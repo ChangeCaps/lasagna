@@ -130,3 +130,22 @@ pub trait Parse<Token>: Sized {
         Error: ParseError<Token>,
         P: Parser<Token, Error> + ?Sized;
 }
+
+impl<Token, T> Parse<Token> for Vec<T>
+where
+    T: Parse<Token>,
+{
+    fn parse<Error, P>(parser: &mut P) -> Result<Self, Error>
+    where
+        Error: ParseError<Token>,
+        P: Parser<Token, Error> + ?Sized,
+    {
+        let mut vec = Vec::new();
+
+        while !parser.is_empty()? {
+            vec.push(parser.parse()?);
+        }
+
+        Ok(vec)
+    }
+}
