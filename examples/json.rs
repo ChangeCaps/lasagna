@@ -1,43 +1,95 @@
-use lasagna::Parse;
+use lasagna::*;
 
-pub struct OpenBracket;
+token!(OpenBrace);
+token!(CloseBrace);
+token!(Equal);
+token!(Comma);
 
-pub struct Integer {
-    pub value: i64,
+parse! {
+    // symbols
+    "{" => OpenBrace,
+    Token > Token::OpenBrace(OpenBrace) => OpenBrace,
+    "}" => CloseBrace,
+    Token > Token::CloseBrace(CloseBrace) => CloseBrace,
+    "=" => Equal,
+    Token > Token::Equal(Equal) => Equal,
+    "," => Comma,
+    Token > Token::Comma(Comma) => Comma,
+
+    // compounds
+    Token > Token::Ident(ident) => Ident > ident,
+    Token > Token::Integer(int) => Integer > int,
 }
 
-impl lasagna::Parse<String> for Integer {
-    type Error = String;
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Ident(pub String);
 
-    #[inline]
-    fn parse(source: String) -> Result<Self, Self::Error> {
-        let value = source.parse::<i64>().map_err(|err| err.to_string())?;
+impl Parse<char> for Ident {
+    fn parse<Error, P>(parser: &mut P) -> Result<Self, Error>
+    where
+        P: Parser<char, Error> + ?Sized,
+        Error: ParseError<char>,
+    {
+        parser.expect('"')?;
 
-        Ok(Integer { value })
+        let mut ident = String::new();
+
+        loop {
+            if let Some(tok) = parser.next() {
+                if tok == '"' {
+                    break Ok(Ident(ident));
+                } else {
+                    ident.push(tok);
+                }
+            } else {
+                break Err(Error::unexpected_eof());
+            }
+        }
     }
 }
 
-pub struct Float {
-    pub value: i64,
-}
-
-impl lasagna::Parse<String> for Integer {
-    type Error = String;
-
-    #[inline]
-    fn parse(source: String) -> Result<Self, Self::Error> {
-        let value = source.parse::<i64>().map_err(|err| err.to_string())?;
-
-        Ok(Integer { value })
-    }
-}
-
-#[derive(Parse)]
-#[parse[String]]
+#[derive(Parse, Clone, Debug, PartialEq, Eq)]
 pub enum Token {
+    OpenBrace(OpenBrace),
+    CloseBrace(CloseBrace),
+    Equal(Equal),
+    Comma(Comma),
+    Ident(Ident),
     Integer(Integer),
 }
 
-fn main() {
+#[derive(Parse, Debug)]
+#[parse(specific(char), specific(Token))]
+pub enum Value {
+    Integer(Integer),
+    String(Ident),
+    Table(Table),
+}
 
+#[derive(Parse, Debug)]
+pub struct Statement {
+    pub lhs: Ident,
+    pub equal: Equal,
+    pub rhs: Value,
+}
+
+pub type Table = Delimited<OpenBrace, Punctuated<Statement, Comma>, CloseBrace>;
+
+fn main() -> Result<(), String> {
+    let json = r#"{
+    "foo" = 10,
+    "baz" = "bar",
+}"#;
+
+    let mut parser = CharsParser::new(json.chars()).skip_whitespace(true);
+
+    let mut tokens: ParseBuffer<Token> = SeparateWhitespace::parse::<String, _>(&mut parser)?
+        .into_iter()
+        .collect();
+
+    let value = Table::parse::<String, _>(&mut tokens)?;
+
+    println!("{:#?}", value);
+
+    Ok(())
 }
