@@ -1,10 +1,8 @@
-use std::{iter::Peekable, str::Chars};
-
 use crate::{ParseError, Parser};
+use std::{iter::Peekable, str::Chars};
 
 #[derive(Clone, Debug)]
 pub struct CharsParser<'a> {
-    skip_whitespace: bool,
     chars: Peekable<Chars<'a>>,
 }
 
@@ -12,15 +10,8 @@ impl<'a> CharsParser<'a> {
     #[inline]
     pub fn new(chars: impl Into<Chars<'a>>) -> Self {
         Self {
-            skip_whitespace: false,
             chars: chars.into().peekable(),
         }
-    }
-
-    #[inline]
-    pub fn skip_whitespace(mut self, skip: bool) -> Self {
-        self.skip_whitespace = skip;
-        self
     }
 }
 
@@ -28,33 +19,21 @@ impl<'a, Error> Parser<char, Error> for CharsParser<'a>
 where
     Error: ParseError<char>,
 {
-    fn next(&mut self) -> Option<char> {
-        if self.skip_whitespace {
-            while self.chars.peek()?.is_whitespace() {
-                self.chars.next();
-            }
-        }
-
-        self.chars.next()
+    fn next(&mut self) -> Result<Option<char>, Error> {
+        Ok(self.chars.next())
     }
 
-    fn peek(&mut self) -> Option<&char> {
-        if self.skip_whitespace {
-            while self.chars.peek()?.is_whitespace() {
-                self.chars.next();
-            }
-        }
-
-        self.chars.peek()
+    fn peek(&mut self) -> Result<Option<&char>, Error> {
+        Ok(self.chars.peek())
     }
 
     fn expect(&mut self, token: char) -> Result<(), Error> {
-        let found = Parser::<char, Error>::next(self);
+        let found = Parser::<char, Error>::next(self)?;
 
         if found == Some(token) {
             Ok(())
         } else {
-            Err(Error::expected(found, &[token]))
+            Err(Error::expected(found, token.into()))
         }
     }
 

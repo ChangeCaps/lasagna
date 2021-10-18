@@ -4,18 +4,18 @@ pub trait Parser<Token, Error>
 where
     Error: ParseError<Token>,
 {
-    fn next(&mut self) -> Option<Token>;
+    fn next(&mut self) -> Result<Option<Token>, Error>;
 
-    fn peek(&mut self) -> Option<&Token>;
+    fn peek(&mut self) -> Result<Option<&Token>, Error>;
 
     #[inline]
-    fn is_empty(&mut self) -> bool {
-        self.peek().is_none()
+    fn is_empty(&mut self) -> Result<bool, Error> {
+        Ok(self.peek()?.is_none())
     }
 
     #[inline]
     fn consume(&mut self) -> Result<(), Error> {
-        if self.next().is_some() {
+        if self.next()?.is_some() {
             Ok(())
         } else {
             Err(Error::unexpected_eof())
@@ -44,12 +44,12 @@ pub trait DynParser<Token, Error>
 where
     Error: ParseError<Token>,
 {
-    fn next(&mut self) -> Option<Token>;
+    fn next(&mut self) -> Result<Option<Token>, Error>;
 
-    fn peek(&mut self) -> Option<&Token>;
+    fn peek(&mut self) -> Result<Option<&Token>, Error>;
 
     fn consume(&mut self) -> Result<(), Error> {
-        if self.next().is_some() {
+        if self.next()?.is_some() {
             Ok(())
         } else {
             Err(Error::unexpected_eof())
@@ -68,11 +68,11 @@ impl<Token, Error, P: Parser<Token, Error>> DynParser<Token, Error> for P
 where
     Error: ParseError<Token>,
 {
-    fn next(&mut self) -> Option<Token> {
+    fn next(&mut self) -> Result<Option<Token>, Error> {
         self.next()
     }
 
-    fn peek(&mut self) -> Option<&Token> {
+    fn peek(&mut self) -> Result<Option<&Token>, Error> {
         self.peek()
     }
 
@@ -97,11 +97,11 @@ impl<Token, Error> Parser<Token, Error> for dyn DynParser<Token, Error> + '_
 where
     Error: ParseError<Token>,
 {
-    fn next(&mut self) -> Option<Token> {
+    fn next(&mut self) -> Result<Option<Token>, Error> {
         self.next()
     }
 
-    fn peek(&mut self) -> Option<&Token> {
+    fn peek(&mut self) -> Result<Option<&Token>, Error> {
         self.peek()
     }
 

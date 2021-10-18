@@ -4,8 +4,10 @@ mod number;
 mod parse;
 mod parse_buffer;
 mod parse_error;
+mod parser_ext;
 mod punctuated;
 mod token;
+mod token_parser;
 mod whitespace;
 
 pub use chars_parser::*;
@@ -15,5 +17,7 @@ pub use number::*;
 pub use parse::*;
 pub use parse_buffer::*;
 pub use parse_error::*;
+pub use parser_ext::*;
 pub use punctuated::*;
+pub use token_parser::*;
 pub use whitespace::*;

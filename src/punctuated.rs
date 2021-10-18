@@ -19,10 +19,10 @@ where
         let mut values = Vec::new();
         let mut punctuation = Vec::new();
 
-        while !parser.is_empty() {
+        while !parser.is_empty()? {
             values.push(parser.parse()?);
 
-            if parser.is_empty() {
+            if parser.is_empty()? {
                 break;
             }
 

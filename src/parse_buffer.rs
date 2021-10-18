@@ -40,30 +40,30 @@ where
     Token: Clone + PartialEq<Token>,
     Error: ParseError<Token>,
 {
-    fn next(&mut self) -> Option<Token> {
+    fn next(&mut self) -> Result<Option<Token>, Error> {
         if self.tokens.is_empty() {
-            None
+            Ok(None)
         } else {
-            Some(self.tokens.remove(0))
+            Ok(Some(self.tokens.remove(0)))
         }
     }
 
-    fn peek(&mut self) -> Option<&Token> {
+    fn peek(&mut self) -> Result<Option<&Token>, Error> {
         if self.tokens.is_empty() {
-            None
+            Ok(None)
         } else {
-            self.tokens.first()
+            Ok(self.tokens.first())
         }
     }
 
     fn expect(&mut self, token: Token) -> Result<(), Error> {
-        let found = Parser::<Token, Error>::next(self);
+        let found = Parser::<Token, Error>::next(self)?;
 
         if let Some(ref tok) = found {
             if *tok == token {
                 Ok(())
             } else {
-                Err(Error::expected(found, &[token]))
+                Err(Error::expected(found, token.into()))
             }
         } else {
             Err(Error::unexpected_eof())
@@ -98,7 +98,7 @@ where
     {
         let mut tokens = Vec::new();
 
-        while parser.peek().is_some() {
+        while parser.peek()?.is_some() {
             tokens.push(Token::parse(parser)?);
         }
 

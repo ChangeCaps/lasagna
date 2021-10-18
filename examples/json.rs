@@ -35,7 +35,7 @@ impl Parse<char> for Ident {
         let mut ident = String::new();
 
         loop {
-            if let Some(tok) = parser.next() {
+            if let Some(tok) = parser.next()? {
                 if tok == '"' {
                     break Ok(Ident(ident));
                 } else {
@@ -79,15 +79,15 @@ fn main() -> Result<(), String> {
     let json = r#"{
     "foo" = 10,
     "baz" = "bar",
+    "table" = {
+        "foo" = 42,
+        "bar" = 42069,
+    },
 }"#;
 
-    let mut parser = CharsParser::new(json.chars()).skip_whitespace(true);
+    let mut parser = CharsParser::new(json.chars()).pad_whitespace::<Token>();
 
-    let mut tokens: ParseBuffer<Token> = SeparateWhitespace::parse::<String, _>(&mut parser)?
-        .into_iter()
-        .collect();
-
-    let value = Table::parse::<String, _>(&mut tokens)?;
+    let value = Table::parse::<String, _>(&mut parser)?;
 
     println!("{:#?}", value);
 

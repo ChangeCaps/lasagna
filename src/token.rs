@@ -33,10 +33,10 @@ macro_rules! parse {
                 P: $crate::Parser<$ty, Error> + ?Sized,
                 Error: $crate::ParseError<$ty>,
             {
-                match parser.next() {
+                match parser.next()? {
                     Some($pat) => Ok($expr),
                     None => Err(Error::unexpected_eof()),
-                    tok => Err(Error::expected(tok, &[])),
+                    tok => Err(Error::expected(tok, $crate::TokenOrMessage::from_str(stringify!($tgt)))),
                 }
             }
         }

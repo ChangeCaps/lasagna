@@ -302,9 +302,12 @@ fn parse(data: &Data, token: &Path) -> (TokenStream, Vec<Type>) {
                     }
                 )*
 
-                let tok = source.next();
+                let tok = source.next()?;
 
-                Err(__Error::expected(tok, &[]))
+                Err(__Error::expected_one(
+                    tok,
+                    &[#(lasagna::TokenOrMessage::from_str(stringify!(#types))),*],
+                ))
             };
 
             (parse, types)

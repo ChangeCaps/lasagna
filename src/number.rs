@@ -12,7 +12,7 @@ impl Parse<char> for Integer {
     {
         let mut negative = false;
 
-        if parser.peek() == Some(&'-') {
+        if parser.peek()? == Some(&'-') {
             parser.consume()?;
 
             negative = true;
@@ -22,7 +22,7 @@ impl Parse<char> for Integer {
         let mut digits = String::new();
 
         loop {
-            let tok = parser.peek().cloned();
+            let tok = parser.peek()?.cloned();
 
             if let Some(tok) = tok {
                 if tok.is_digit(radix) {

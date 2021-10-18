@@ -21,29 +21,40 @@ where
     {
         let left = parser.parse()?;
         let mut content = ParseBuffer::new();
-        let right;
 
-        let mut count = 1;
+        let mut count = 0;
 
-        loop {
-            if parser.try_parse::<L>().is_some() {
-                count += 1;
-            } else if let Some(r) = parser.try_parse::<R>() {
-                count -= 1;
+        let right = loop {
+            let _ = parser.try_parse_with(|parser| {
+                if parser.parse::<L>().is_ok() {
+                    count += 1;
+                }
 
-                if count == 0 {
-                    right = r;
+                Result::<(), _>::Err(Error::unexpected_eof())
+            });
 
-                    break;
+            {
+                if count > 0 {
+                    let _ = parser.try_parse_with(|parser| {
+                        if parser.parse::<R>().is_ok() {
+                            count -= 1;
+                        }
+
+                        Result::<(), _>::Err(Error::unexpected_eof())
+                    });
+                } else {
+                    if let Some(right) = parser.try_parse() {
+                        break right;
+                    }
                 }
             }
 
-            if let Some(tok) = parser.next() {
+            if let Some(tok) = parser.next()? {
                 content.push(tok);
             } else {
                 return Err(Error::unexpected_eof());
             }
-        }
+        };
 
         Ok(Self {
             left,
