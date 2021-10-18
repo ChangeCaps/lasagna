@@ -151,11 +151,11 @@ where
     Out: Parse<In> + PartialEq<Out>,
 {
     fn next(&mut self) -> Result<Option<Out>, Error> {
+        self.peek = None;
+
         if self.parser.is_empty()? {
             return Ok(None);
         }
-
-        self.peek = None;
 
         Ok(Some(self.parser.parse()?))
     }
