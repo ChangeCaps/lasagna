@@ -76,18 +76,11 @@ pub struct Statement {
 pub type Table = Delimited<OpenBrace, Punctuated<Statement, Comma>, CloseBrace>;
 
 fn main() -> Result<(), String> {
-    let json = r#"{
-    "foo" = 10,
-    "baz" = "bar",
-    "table" = {
-        "foo" = 42,
-        "bar" = 42069,
-    },
-}"#;
+    let json = r#""foo"=10"#;
 
     let mut parser = CharsParser::new(json.chars()).pad_whitespace::<Token>();
 
-    let value = Table::parse::<String, _>(&mut parser)?;
+    let value = Vec::<Statement>::parse::<String, _>(&mut parser)?;
 
     println!("{:#?}", value);
 

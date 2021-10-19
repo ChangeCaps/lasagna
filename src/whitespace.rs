@@ -88,11 +88,13 @@ where
     Out: Parse<In> + PartialEq<Out>,
 {
     fn next(&mut self) -> Result<Option<Out>, Error> {
+        if let Some(peek) = self.peek.take() {
+            return Ok(Some(peek));
+        }
+
         if self.parser.is_empty()? {
             return Ok(None);
         }
-
-        self.peek = None;
 
         self.parser.parse::<Whitespace>()?;
 
@@ -151,6 +153,10 @@ where
     Out: Parse<In> + PartialEq<Out>,
 {
     fn next(&mut self) -> Result<Option<Out>, Error> {
+        if let Some(peek) = self.peek.take() {
+            return Ok(Some(peek));
+        }
+
         if self.parser.is_empty()? {
             return Ok(None);
         }
