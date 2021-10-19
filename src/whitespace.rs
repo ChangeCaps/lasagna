@@ -151,13 +151,23 @@ where
     Out: Parse<In> + PartialEq<Out>,
 {
     fn next(&mut self) -> Result<Option<Out>, Error> {
+        if self.parser.is_empty()? {
+            return Ok(None);
+        }
+
         self.peek = None;
+
+        self.parser.parse::<Whitespace>()?;
 
         if self.parser.is_empty()? {
             return Ok(None);
         }
 
-        Ok(Some(self.parser.parse()?))
+        let out = self.parser.parse()?;
+
+        self.parser.parse::<Whitespace>()?;
+
+        Ok(Some(out))
     }
 
     fn peek(&mut self) -> Result<Option<&Out>, Error> {
@@ -193,5 +203,20 @@ where
 
             parser(&mut par)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::*;
+
+    #[test]
+    fn whitespace_parser() {
+        let mut parser = CharsParser::new("  3   3   ".chars()).pad_whitespace::<Integer>();
+
+        let _: Result<_, String> = Parser::next(&mut parser);
+        let _: Result<_, String> = Parser::next(&mut parser);
+
+        assert!(parser.is_empty().unwrap());
     }
 }
