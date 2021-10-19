@@ -254,7 +254,7 @@ fn parse(data: &Data, token: &Path) -> (TokenStream, Vec<Type>) {
                             types.push(field_ty.clone());
 
                             quote! {
-                                #name: <#field_ty as lasagna::Parse<#token>>::parse(parser)?
+                                #name: #field_ty::parse(parser)?
                             }
                         });
 

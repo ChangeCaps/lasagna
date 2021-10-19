@@ -212,10 +212,26 @@ mod tests {
 
     #[test]
     fn whitespace_parser() {
+        struct Foo;
+
+        impl Parse<Integer> for Foo {
+            fn parse<Error, P>(parser: &mut P) -> Result<Self, Error>
+            where
+                Error: ParseError<Integer>,
+                P: Parser<Integer, Error> + ?Sized,
+            {
+                if parser.next()?.is_some() {
+                    Ok(Self)
+                } else {
+                    Err(Error::message("expected integer"))
+                }
+            }
+        }
+
         let mut parser = CharsParser::new("  3   3   ".chars()).pad_whitespace::<Integer>();
 
-        let _: Result<_, String> = Parser::next(&mut parser);
-        let _: Result<_, String> = Parser::next(&mut parser);
+        let _: Result<_, String> = parser.parse::<Foo>();
+        let _ = parser.try_parse::<Foo>();
 
         assert!(parser.is_empty().unwrap());
     }
