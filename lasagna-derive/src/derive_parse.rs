@@ -284,7 +284,7 @@ fn fields_named<'a>(
 
         quote_spanned! {name.span()=>
             #name: {
-                let field = parser.parse()?;
+                let field = parser.parse::<#ty>()?;
 
                 #span
 
@@ -321,7 +321,7 @@ fn fields_unnamed<'a>(
 
         quote_spanned! {field.span()=>
             {
-                let field = parser.parse()?;
+                let field = parser.parse::<#ty>()?;
 
                 #span
 
