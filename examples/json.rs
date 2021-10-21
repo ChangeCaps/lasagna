@@ -1,88 +1,83 @@
 use lasagna::*;
 
-token!(OpenBrace);
-token!(CloseBrace);
-token!(Equal);
-token!(Comma);
-
-parse! {
-    // symbols
-    "{" => OpenBrace,
-    Token > Token::OpenBrace(OpenBrace) => OpenBrace,
-    "}" => CloseBrace,
-    Token > Token::CloseBrace(CloseBrace) => CloseBrace,
-    "=" => Equal,
-    Token > Token::Equal(Equal) => Equal,
-    "," => Comma,
-    Token > Token::Comma(Comma) => Comma,
-
-    // compounds
-    Token > Token::Ident(ident) => Ident > ident,
-    Token > Token::Integer(int) => Integer > int,
+#[derive(Named, Token, Clone, Debug, PartialEq, Eq)]
+pub enum JsonToken {
+    #[token = "{"]
+    OpenBrace,
+    #[token = "}"]
+    CloseBrace,
+    #[token = "="]
+    Equal,
+    #[token = ","]
+    Comma,
+    #[token]
+    LitStr(LitStr),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Ident(pub String);
+#[derive(Named, Clone, Debug, PartialEq, Eq)]
+#[name = "<string>"]
+pub struct LitStr(pub String);
 
-impl Parse<char> for Ident {
-    fn parse<Error, P>(parser: &mut P) -> Result<Self, Error>
-    where
-        P: Parser<char, Error> + ?Sized,
-        Error: ParseError<char>,
-    {
-        parser.expect('"')?;
+impl Token for LitStr {
+    fn lex(lexer: &mut impl Lexer<Output = char>) -> Result<Spanned<Self>, ParseError> {
+        let mut span = lexer.span(0);
 
-        let mut ident = String::new();
+        lexer.expect('"')?;
+
+        let mut string = String::new();
 
         loop {
-            if let Some(tok) = parser.next()? {
-                if tok == '"' {
-                    break Ok(Ident(ident));
+            let next = lexer.next();
+
+            if let Some(next_char) = next.value {
+                if next_char == '"' {
+                    span |= lexer.span(0);
+
+                    break;
                 } else {
-                    ident.push(tok);
+                    string.push(next_char);
                 }
             } else {
-                break Err(Error::unexpected_eof());
+                return Err(ParseError::msg(next.span, "expected end to string"));
             }
         }
+
+        Ok(Spanned::new(Self(string), span))
     }
 }
 
-#[derive(Parse, Clone, Debug, PartialEq, Eq)]
-pub enum Token {
-    OpenBrace(OpenBrace),
-    CloseBrace(CloseBrace),
-    Equal(Equal),
-    Comma(Comma),
-    Ident(Ident),
-    Integer(Integer),
-}
-
 #[derive(Parse, Debug)]
-#[parse(specific(char), specific(Token))]
 pub enum Value {
-    Integer(Integer),
-    String(Ident),
+    String(LitStr),
+    #[parse(peek = OpenBrace)]
     Table(Table),
 }
 
 #[derive(Parse, Debug)]
 pub struct Statement {
-    pub lhs: Ident,
+    pub ident: LitStr,
     pub equal: Equal,
-    pub rhs: Value,
+    pub value: Value,
 }
 
-pub type Table = Delimited<OpenBrace, Punctuated<Statement, Comma>, CloseBrace>;
+#[derive(Parse, Debug)]
+pub struct Table {
+    pub open: OpenBrace,
+    pub stmts: Punctuated<Statement, Comma, CloseBrace>,
+    pub close: CloseBrace,
+}
 
-fn main() -> Result<(), String> {
-    let json = r#""foo"=10"#;
+fn main() {
+    let source = r#"{
+    "foo" = {
+       "bar" = "baz",
+       "bar" = "baz"
+    },
+}"#;
 
-    let mut parser = CharsParser::new(json.chars()).pad_whitespace::<Token>();
+    let mut parser = SkipWhitespace::new(CharsLexer::new(source.chars())).parse_as::<JsonToken>();
 
-    let value = Vec::<Statement>::parse::<String, _>(&mut parser)?;
+    let table = parser.parse::<Table>().unwrap();
 
-    println!("{:#?}", value);
-
-    Ok(())
+    println!("{:#?}", table);
 }

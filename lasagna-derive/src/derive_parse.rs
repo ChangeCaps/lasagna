@@ -1,347 +1,301 @@
-use proc_macro2::{Ident, Span, TokenStream};
+use proc_macro2::TokenStream;
 use quote::{quote, quote_spanned};
 use syn::{
-    parenthesized,
-    parse::{Parse, ParseStream},
+    parse::{Parse, ParseStream, Parser},
     parse_macro_input, parse_quote,
-    punctuated::Punctuated,
-    token::Impl,
-    Attribute, Data, DeriveInput, Error, Expr, Fields, Generics, Path, Token, Type, TypeParamBound,
+    spanned::Spanned,
+    Attribute, Data, DeriveInput, Fields, FieldsNamed, FieldsUnnamed, Path, Token, Type,
 };
 
-struct Param {
-    generics: Option<Generics>,
-    token: Path,
+#[derive(Default)]
+struct Attributes {
+    token: Option<Type>,
 }
 
-impl Parse for Param {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let generics = if Impl::parse(input).is_ok() {
-            let generics = Generics::parse(input)?;
-
-            Some(generics)
-        } else {
-            None
-        };
-
-        Ok(Self {
-            generics,
-            token: Path::parse(input)?,
-        })
+impl Attributes {
+    fn from_attrs(&mut self, attrs: &[Attribute]) {
+        for attr in attrs {
+            if attr
+                .path
+                .get_ident()
+                .map(|ident| ident == "token")
+                .unwrap_or(false)
+            {
+                if let Ok(ty) = attr.parse_args::<Type>() {
+                    self.token = Some(ty);
+                }
+            }
+        }
     }
 }
 
-syn::custom_keyword!(specific);
-syn::custom_keyword!(expect);
+syn::custom_keyword!(peek);
 
-enum Arg {
-    Specific(Param),
-    Expect(Punctuated<Expr, Token![,]>),
-}
+struct Peek(Path);
 
-impl Parse for Arg {
+impl Parse for Peek {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        if specific::parse(input).is_ok() {
-            let content;
+        peek::parse(input)?;
 
-            parenthesized!(content in input);
+        <Token![=]>::parse(input)?;
 
-            Ok(Arg::Specific(Param::parse(&content)?))
-        } else if expect::parse(input).is_ok() {
-            let content;
-
-            parenthesized!(content in input);
-
-            Ok(Arg::Expect(Punctuated::parse_terminated(&content)?))
-        } else {
-            Err(Error::new(Span::call_site(), "invalid argument"))
-        }
+        Ok(Self(Path::parse(input)?))
     }
 }
 
 #[derive(Default)]
-struct Attributes {
-    expect: Option<Vec<Expr>>,
-    types: Vec<Param>,
+struct VariantAttributes {
+    peek: Option<Path>,
 }
 
-impl Attributes {
-    fn parse_from_attrs(attrs: &[Attribute]) -> Self {
-        let mut attributes = Attributes::default();
-
+impl VariantAttributes {
+    fn from_attrs(&mut self, attrs: &[Attribute]) {
         for attr in attrs {
-            if let Some(ident) = attr.path.get_ident() {
-                if ident == "parse" {
-                    let args = attr
-                        .parse_args_with(|input: ParseStream| {
-                            Punctuated::<Arg, Token!(,)>::parse_terminated(input)
-                        })
-                        .unwrap();
-
-                    for arg in args {
-                        match arg {
-                            Arg::Expect(expr) => {
-                                attributes
-                                    .expect
-                                    .get_or_insert_with(Default::default)
-                                    .append(&mut expr.into_iter().collect());
-                            }
-                            Arg::Specific(param) => {
-                                attributes.types.push(param);
-                            }
-                        }
-                    }
+            if attr
+                .path
+                .get_ident()
+                .map(|ident| ident == "parse")
+                .unwrap_or(false)
+            {
+                if let Ok(path) = attr.parse_args::<Peek>() {
+                    self.peek = Some(path.0);
                 }
             }
         }
-
-        attributes
     }
 }
 
 pub fn derive_parse(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
 
+    let mut attrs = Attributes::default();
+    attrs.from_attrs(&input.attrs);
+
     let name = input.ident;
 
-    let attrs = Attributes::parse_from_attrs(&input.attrs);
+    let mut source = None;
+    let parse = parse(input.data, attrs, &mut source);
 
-    let data = &input.data;
-    let generics = input.generics;
+    let (impl_generics, type_generics, where_clause) = input.generics.split_for_impl();
 
-    let expanded = if attrs.types.is_empty() {
-        let param = Param {
-            generics: Some(parse_quote!(<__Token>)),
-            token: parse_quote!(__Token),
-        };
+    let source = source.unwrap();
 
-        let parse = parse_token(
-            &name,
-            data,
-            &generics,
-            &param,
-            attrs.expect.as_ref().map(|expect| expect.first().unwrap()),
-            true,
-        );
+    let expanded = quote! {
+        impl #impl_generics lasagna::Parse for #name #type_generics #where_clause {
+            type Source = #source;
 
-        quote! {
-            #parse
-        }
-    } else {
-        let impls = attrs.types.iter().enumerate().map(|(i, param)| {
-            parse_token(
-                &name,
-                data,
-                &generics,
-                param,
-                attrs.expect.as_ref().map(|expect| &expect[i]),
-                false,
-            )
-        });
-
-        quote! {
-            #(#impls)*
+            fn parse(
+                parser: &mut impl lasagna::Parser<Source = Self::Source>
+            ) -> Result<lasagna::Spanned<Self>, lasagna::ParseError> {
+                #parse
+            }
         }
     };
 
     proc_macro::TokenStream::from(expanded)
 }
 
-fn parse_token(
-    name: &Ident,
-    data: &Data,
-    generics: &Generics,
-    param: &Param,
-    expect: Option<&Expr>,
-    field_bounds: bool,
-) -> TokenStream {
-    let mut generics = generics.clone();
+fn parse(data: Data, attrs: Attributes, source: &mut Option<Type>) -> TokenStream {
+    if let Some(ty) = attrs.token {
+        *source = Some(ty);
 
-    add_generics(&mut generics, param);
-
-    let mut impl_generics = impl_generics(generics.clone(), &param);
-    let (_, type_generics, _) = generics.split_for_impl();
-
-    let token = &param.token;
-
-    if let Some(expect) = expect {
-        let (impl_generics, _, where_clause) = impl_generics.split_for_impl();
-
-        quote! {
-            impl #impl_generics lasagna::Parse<#token> for
-                #name #type_generics #where_clause
-            {
-                fn parse<__Error, __Parser>(source: &mut __Parser) -> Result<Self, __Error>
-                where
-                    __Parser: lasagna::Parser<#token, __Error> + ?Sized,
-                    __Error: lasagna::ParseError<#token>,
-                {
-                    source.expect(#expect)?;
-
-                    Ok(Self)
-                }
-            }
-        }
-    } else {
-        let (parse, types) = parse(data, token);
-
-        if field_bounds {
-            self::field_bounds(&mut impl_generics, token, types);
-        }
-
-        let (impl_generics, _, where_clause) = impl_generics.split_for_impl();
-
-        quote! {
-            impl #impl_generics lasagna::Parse<#token> for
-                #name #type_generics #where_clause
-            {
-                fn parse<__Error, __Parser>(source: &mut __Parser) -> Result<Self, __Error>
-                where
-                    __Parser: lasagna::Parser<#token, __Error> + ?Sized,
-                    __Error: lasagna::ParseError<#token>,
-                {
-                    #parse
-                }
-            }
-        }
+        return quote! {
+            parser.next::<Self>()
+        };
     }
-}
-
-fn add_generics(generics: &mut Generics, param: &Param) {
-    let token = &param.token;
-
-    for param in generics.type_params_mut() {
-        param
-            .bounds
-            .push(TypeParamBound::Trait(parse_quote!(lasagna::Parse<#token>)));
-    }
-}
-
-fn impl_generics(mut ty_generics: Generics, param: &Param) -> Generics {
-    if let Some(ref generics) = param.generics {
-        for param in &generics.params {
-            ty_generics.params.push(param.clone());
-        }
-    }
-
-    ty_generics
-}
-
-fn field_bounds(generics: &mut Generics, token: &Path, types: Vec<Type>) {
-    let where_clause = generics.where_clause.get_or_insert(parse_quote!(where));
-
-    for ty in types {
-        where_clause
-            .predicates
-            .push(parse_quote!(#ty: lasagna::Parse<#token>));
-    }
-}
-
-fn parse(data: &Data, token: &Path) -> (TokenStream, Vec<Type>) {
-    let mut types = Vec::new();
 
     match data {
         Data::Enum(data) => {
-            let mut variants = Vec::new();
+            let mut names = Vec::new();
 
-            for variant in &data.variants {
-                match variant.fields {
-                    Fields::Named(ref named) => {
-                        let parse = named.named.iter().map(|field| {
-                            let name = field.ident.as_ref().unwrap();
-                            let field_ty = &field.ty;
+            let variants = data.variants.iter().map(|variant| {
+                let name = &variant.ident;
 
-                            types.push(field_ty.clone());
+                names.push(name.to_string());
 
-                            quote! {
-                                #name: #field_ty::parse(parser)?
-                            }
-                        });
+                let mut var_attrs = VariantAttributes::default();
+                var_attrs.from_attrs(&variant.attrs);
 
-                        let name = &variant.ident;
+                let var = match &variant.fields {
+                    Fields::Named(named) => {
+                        let fields = fields_named(&named, source);
 
-                        variants.push(quote! {
-                            |parser| {
-                                Result::<Self, __Error>::Ok(Self::#name {
-                                    #(#parse),*
-                                })
-                            }
-                        });
+                        quote_spanned! {variant.span()=>
+                            Spanned::new(
+                                Self::#name { #(#fields),* },
+                                span,
+                            )
+                        }
                     }
-                    Fields::Unnamed(ref unnamed) => {
-                        let parse = unnamed.unnamed.iter().map(|field| {
-                            let field_ty = &field.ty;
+                    Fields::Unnamed(unnamed) => {
+                        let fields = fields_unnamed(&unnamed, source);
 
-                            types.push(field_ty.clone());
-
-                            quote! {
-                                lasagna::Parse::parse(parser)?
-                            }
-                        });
-
-                        let name = &variant.ident;
-
-                        variants.push(quote! {
-                            |parser| {
-                                Result::<Self, __Error>::Ok(Self::#name(#(#parse),*))
-                            }
-                        });
+                        quote_spanned! {variant.span()=>
+                            Spanned::new(
+                                Self::#name(#(#fields),*),
+                                span,
+                            )
+                        }
                     }
-                    _ => {}
+                    _ => unimplemented!(),
+                };
+
+                if let Some(peek) = &var_attrs.peek {
+                    quote! {
+                        let mut fork = parser.fork();
+
+                        if fork.next::<#peek>().is_ok() {
+                            #[allow(unused_mut)]
+                            let mut span;
+
+                            return Ok(#var);
+                        }
+                    }
+                } else {
+                    try_variant(var)
                 }
+            });
+
+            quote! {
+                #(#variants)*
+
+                Err(lasagna::ParseError::ExpectedOne {
+                    span: parser.span(0),
+                    expected: vec![#(String::from(#names)),*],
+                })
             }
-
-            let parse = quote! {
-                use lasagna::Parse;
-
-                #(
-                    let branch = source.try_parse_with(#variants);
-
-                    if branch.is_ok() {
-                        return branch;
-                    }
-                )*
-
-                let tok = source.next()?;
-
-                Err(__Error::expected_one(
-                    tok,
-                    &[#(lasagna::TokenOrMessage::from_str(stringify!(#types))),*],
-                ))
-            };
-
-            (parse, types)
         }
         Data::Struct(data) => match data.fields {
-            Fields::Named(ref named) => {
-                let fields = named.named.iter().map(|field| {
-                    let ident = field.ident.as_ref().unwrap();
-                    let field_ty = &field.ty;
+            Fields::Named(named) => {
+                let fields = fields_named(&named, source);
 
-                    types.push(field_ty.clone());
+                quote! {
+                    let mut span;
 
-                    quote_spanned! {ident.span()=>
-                        #ident: lasagna::Parse::parse(source)?
-                    }
-                });
+                    Ok(Spanned::new(
+                        Self {
+                            #(#fields),*
+                        },
+                        span,
+                    ))
+                }
+            }
+            Fields::Unnamed(unnamed) => {
+                let fields = fields_unnamed(&unnamed, source);
 
-                let parse = quote! {
-                    Ok(Self {
-                        #(#fields),*
-                    })
-                };
+                quote! {
+                    let mut span;
 
-                (parse, types)
+                    Ok(Spanned::new(
+                        Self {
+                            #(#fields),*
+                        },
+                        span,
+                    ))
+                }
             }
             Fields::Unit => {
-                let parse = quote! {
-                    Ok(Self)
-                };
-
-                (parse, types)
+                quote! {
+                    parser.next::<Self>()
+                }
             }
-            _ => unimplemented!(),
         },
         _ => unimplemented!(),
     }
+}
+
+fn try_variant(variant: TokenStream) -> TokenStream {
+    quote! {
+        let variant = |parser| {
+            #[allow(unused_mut)]
+            let mut span;
+
+            Result::<_, lasagna::ParseError>::Ok(#variant)
+        };
+
+        let mut fork = parser.fork();
+
+        let variant = variant(&mut fork);
+
+        if variant.is_ok() {
+            *parser = fork;
+
+            return variant;
+        }
+    }
+}
+
+fn fields_named<'a>(
+    fields: &'a FieldsNamed,
+    source: &'a mut Option<Type>,
+) -> impl Iterator<Item = TokenStream> + 'a {
+    let mut span_set = false;
+
+    fields.named.iter().map(move |field| {
+        let name = field.ident.as_ref().unwrap();
+        let ty = &field.ty;
+
+        if source.is_none() {
+            *source = Some(parse_quote!(<#ty as lasagna::Parse>::Source));
+        }
+
+        let span = if span_set {
+            quote! {
+                span |= field.span;
+            }
+        } else {
+            span_set = true;
+
+            quote! {
+                span = field.span;
+            }
+        };
+
+        quote_spanned! {name.span()=>
+            #name: {
+                let field = <#ty as lasagna::Parse>::parse(parser)?;
+
+                #span
+
+                field.value
+            }
+        }
+    })
+}
+
+fn fields_unnamed<'a>(
+    fields: &'a FieldsUnnamed,
+    source: &'a mut Option<Type>,
+) -> impl Iterator<Item = TokenStream> + 'a {
+    let mut span_set = false;
+
+    fields.unnamed.iter().map(move |field| {
+        let ty = &field.ty;
+
+        if source.is_none() {
+            *source = Some(parse_quote!(<#ty as lasagna::Parse>::Source));
+        }
+
+        let span = if span_set {
+            quote! {
+                span |= field.span;
+            }
+        } else {
+            span_set = true;
+
+            quote! {
+                span = field.span;
+            }
+        };
+
+        quote_spanned! {field.span()=>
+            {
+                let field = <#ty as lasagna::Parse>::parse(parser)?;
+
+                #span
+
+                field.value
+            }
+        }
+    })
 }

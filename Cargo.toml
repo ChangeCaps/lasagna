@@ -10,3 +10,5 @@ members = ["lasagna-derive"]
 
 [dependencies]
 lasagna-derive = { path = "lasagna-derive" }
+lazy_static = "^1.4"
+regex = "^1.5"

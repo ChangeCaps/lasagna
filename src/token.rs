@@ -1,65 +1,126 @@
-#[macro_export]
-macro_rules! token {
-    ($ident:ident) => {
-        #[allow(non_camel_case_types)]
-        #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-        pub struct $ident;
-    };
+use std::{iter::Peekable, str::Chars};
+
+use crate::{ParseError, Span, Spanned};
+
+pub trait Named {
+    const NAME: &'static str;
 }
 
-#[macro_export]
-macro_rules! parse {
-    ($ty:ty > $expr:expr => $tgt:ty $(, $($tt:tt)*)?) => {
-        impl $crate::Parse<$ty> for $tgt {
-            #[inline]
-            fn parse<Error, P>(parser: &mut P) -> Result<Self, Error>
-            where
-                P: $crate::Parser<$ty, Error> + ?Sized,
-                Error: $crate::ParseError<$ty>,
-            {
-                parser.expect($expr)?;
+pub trait Token<Source = char>: Sized + Named {
+    fn lex(lexer: &mut impl Lexer<Output = Source>) -> Result<Spanned<Self>, ParseError>;
+}
 
-                Ok(Self)
-            }
+pub trait Lexer {
+    type Output;
+
+    /// Returns a [`Span`] at the cursor of the lexer.
+    fn span(&mut self, length: usize) -> Span;
+
+    fn next(&mut self) -> Spanned<Option<Self::Output>>;
+
+    fn peek(&mut self) -> Spanned<Option<&Self::Output>>;
+
+    #[inline]
+    fn is_empty(&mut self) -> bool {
+        self.peek().is_none()
+    }
+
+    fn expect(&mut self, expected: Self::Output) -> Result<(), ParseError>;
+
+    #[inline]
+    fn consume(&mut self) {
+        self.next();
+    }
+
+    fn fork(&mut self) -> Self;
+}
+
+#[derive(Clone)]
+pub struct CharsLexer<'a> {
+    line: usize,
+    column: usize,
+    offset: usize,
+    chars: Peekable<Chars<'a>>,
+}
+
+impl<'a> CharsLexer<'a> {
+    #[inline]
+    pub fn new(chars: Chars<'a>) -> Self {
+        Self {
+            line: 0,
+            column: 0,
+            offset: 0,
+            chars: chars.peekable(),
         }
+    }
+}
 
-        $(parse!($($tt)*);)?
-    };
-    ($ty:ty > $pat:pat => $tgt:ty > $expr:expr $(, $($tt:tt)*)?) => {
-        impl $crate::Parse<$ty> for $tgt {
-            #[inline]
-            fn parse<Error, P>(parser: &mut P) -> Result<Self, Error>
-            where
-                P: $crate::Parser<$ty, Error> + ?Sized,
-                Error: $crate::ParseError<$ty>,
-            {
-                match parser.next()? {
-                    Some($pat) => Ok($expr),
-                    None => Err(Error::unexpected_eof()),
-                    tok => Err(Error::expected(tok, $crate::TokenOrMessage::from_str(stringify!($tgt)))),
-                }
-            }
+impl<'a> Lexer for CharsLexer<'a> {
+    type Output = char;
+
+    #[inline]
+    fn span(&mut self, length: usize) -> Span {
+        Span {
+            line: self.line,
+            column: self.column,
+            offset: self.offset,
+            length,
         }
+    }
 
-        $(parse!($($tt)*);)?
-    };
-    ($chars:expr => $tgt:ty $(, $($tt:tt)*)?) => {
-        impl $crate::Parse<char> for $tgt {
-            #[inline]
-            fn parse<Error, P>(parser: &mut P) -> Result<Self, Error>
-            where
-                P: $crate::Parser<char, Error> + ?Sized,
-                Error: $crate::ParseError<char>,
-            {
-                for c in $chars.chars() {
-                    parser.expect(c)?;
-                }
+    #[inline]
+    fn next(&mut self) -> Spanned<Option<char>> {
+        if let Some(c) = self.chars.next() {
+            let span = self.span(1);
 
-                Ok(Self)
+            self.offset += 1;
+
+            if c == '\n' {
+                self.column = 0;
+                self.line += 1;
+            } else {
+                self.column += 1;
             }
-        }
 
-        $(parse!($($tt)*);)?
-    };
-    () => {};
+            Spanned::new(Some(c), span)
+        } else {
+            Spanned::new(None, self.span(0))
+        }
+    }
+
+    #[inline]
+    fn peek(&mut self) -> Spanned<Option<&char>> {
+        let mut span = self.span(1);
+
+        if let Some(c) = self.chars.peek() {
+            Spanned::new(Some(c), span)
+        } else {
+            span.length = 0;
+
+            Spanned::new(None, span)
+        }
+    }
+
+    #[inline]
+    fn expect(&mut self, expected: Self::Output) -> Result<(), ParseError> {
+        let next = self.next();
+
+        if let Some(next_char) = next.value {
+            if next_char == expected {
+                Ok(())
+            } else {
+                Err(ParseError::Expected {
+                    found: Spanned::new(String::from(next_char), next.span),
+                    expected: String::from(expected),
+                })
+            }
+        } else {
+            Err(ParseError::eof(next.span, expected))
+        }
+    }
+
+    #[inline]
+    fn fork(&mut self) -> Self {
+        self.clone()
+    }
 }

@@ -1,40 +1,16 @@
-use crate::{DynParser, MutOrOwned, ParseError, Parser, TokenParser, WhitespaceParser};
+use std::fmt::Display;
 
-pub trait ParserExt<Token, Error>
-where
-    Error: ParseError<Token>,
-    Self: Parser<Token, Error>,
-{
-    fn parse_as<'a, Out>(self) -> TokenParser<'a, Out, dyn DynParser<Token, Error> + 'a>
-    where
-        Self: 'a;
+use crate::{LexerParser, Named, Parse, Parser, ParserLexer};
 
-    fn pad_whitespace<'a, Out>(
-        self,
-    ) -> WhitespaceParser<Out, Box<dyn DynParser<Token, Error> + 'a>>
+pub trait ParserExt: Parser {
+    #[inline]
+    fn parse_as<T>(self) -> LexerParser<ParserLexer<T, Self>>
     where
-        Self: 'a;
-}
-
-impl<Token, Error, P> ParserExt<Token, Error> for P
-where
-    Error: ParseError<Token>,
-    Self: Parser<Token, Error>,
-{
-    fn parse_as<'a, Out>(self) -> TokenParser<'a, Out, dyn DynParser<Token, Error> + 'a>
-    where
-        Self: 'a,
+        Self: Sized,
+        T: Parse<Source = Self::Source> + PartialEq<T> + Named + Display + Clone,
     {
-        TokenParser {
-            parser: MutOrOwned::Owned(Box::new(self)),
-            peek: None,
-        }
-    }
-
-    fn pad_whitespace<'a, Out>(self) -> WhitespaceParser<Out, Box<dyn DynParser<Token, Error> + 'a>>
-    where
-        Self: 'a,
-    {
-        WhitespaceParser::new(Box::new(self))
+        LexerParser::new(ParserLexer::new(self))
     }
 }
+
+impl<T: Parser> ParserExt for T {}
