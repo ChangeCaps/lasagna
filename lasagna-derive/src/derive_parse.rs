@@ -215,7 +215,7 @@ fn parse(data: Data, attrs: Attributes, source: &mut Option<Type>) -> TokenStrea
 fn try_variant(variant: TokenStream) -> TokenStream {
     quote! {
         {
-            let variant = |parser| {
+            let variant = |parser: &mut _| {
                 Result::<_, lasagna::ParseError>::Ok(#variant)
             };
 

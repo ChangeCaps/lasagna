@@ -38,6 +38,7 @@ where
             let mut fork = parser.fork();
 
             if let Ok(term) = fork.next::<Term>() {
+                *parser = fork;
                 termination = Some(term);
 
                 break;
@@ -95,7 +96,7 @@ where
 
     #[inline]
     fn parse(parser: &mut impl Parser<Source = Source>) -> Result<Self, ParseError> {
-        let mut span = parser.span(0);
+        let span = parser.span(0);
         let mut values = Vec::new();
         let mut punctuation = Vec::new();
 
@@ -105,6 +106,7 @@ where
             let mut fork = parser.fork();
 
             if let Ok(term) = fork.next::<Term>() {
+                *parser = fork;
                 termination = Some(term);
 
                 break;
@@ -119,6 +121,7 @@ where
             let mut fork = parser.fork();
 
             if let Ok(term) = fork.next::<Term>() {
+                *parser = fork;
                 termination = Some(term);
 
                 break;
@@ -128,7 +131,7 @@ where
         }
 
         Ok(Self {
-            span,
+            span: span | parser.span(0),
             values,
             punctuation,
             termination,
