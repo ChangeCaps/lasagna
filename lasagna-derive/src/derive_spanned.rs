@@ -47,6 +47,19 @@ fn span(data: &Data) -> TokenStream {
                             Self::#variant_name(#(#names),*) => #(#fields.span())|*
                         });
                     }
+                    Fields::Named(named) => {
+                        let names = named.named.iter().map(|field| {
+                            let ident = field.ident.as_ref().unwrap();
+
+                            quote!(#ident)
+                        });
+
+                        let fields = names.clone();
+
+                        variants.push(quote_spanned! {variant_name.span()=>
+                            Self::#variant_name { #(#names),* } => #(#fields.span())|*
+                        });
+                    }
                     _ => unimplemented!(),
                 }
             }
