@@ -6,6 +6,20 @@ pub trait Parse: Sized {
     fn parse(parser: &mut impl Parser<Source = Self::Source>) -> Result<Spanned<Self>, ParseError>;
 }
 
+impl<T> Parse for Box<T>
+where
+    T: Parse,
+{
+    type Source = T::Source;
+
+    #[inline]
+    fn parse(parser: &mut impl Parser<Source = Self::Source>) -> Result<Spanned<Self>, ParseError> {
+        let t = parser.parse()?;
+
+        Ok(Spanned::new(Box::new(t.value), t.span))
+    }
+}
+
 pub trait Parser {
     type Source;
 
