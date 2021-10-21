@@ -1,7 +1,9 @@
 use std::{
     cmp::Ordering,
-    ops::{BitOr, BitOrAssign},
+    ops::{BitOr, BitOrAssign, Deref, DerefMut},
 };
+
+use crate::{Parse, ParseError, Parser};
 
 /// A struct that denotes a location in the source of a file.
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -63,5 +65,58 @@ impl<T: Spanned> Spanned for Box<T> {
     #[inline]
     fn span(&self) -> Span {
         self.as_ref().span()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SpannedOption<T> {
+    span: Span,
+    value: Option<T>,
+}
+
+impl<T> Spanned for SpannedOption<T> {
+    #[inline]
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+impl<T> Parse for SpannedOption<T>
+where
+    T: Parse,
+{
+    type Source = T::Source;
+
+    #[inline]
+    fn parse(parser: &mut impl Parser<Source = Self::Source>) -> Result<Self, ParseError> {
+        let span = parser.span(0);
+
+        if let Ok(t) = parser.parse::<T>() {
+            Ok(Self {
+                span: span | parser.span(0),
+                value: Some(t),
+            })
+        } else {
+            Ok(Self {
+                span: span | parser.span(0),
+                value: None,
+            })
+        }
+    }
+}
+
+impl<T> Deref for SpannedOption<T> {
+    type Target = Option<T>;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
+impl<T> DerefMut for SpannedOption<T> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.value
     }
 }
