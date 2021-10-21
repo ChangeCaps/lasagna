@@ -1,4 +1,5 @@
 mod error;
+mod number;
 mod parser;
 mod parser_ext;
 mod parser_lexer;
@@ -7,6 +8,7 @@ mod token;
 mod vec;
 
 pub use error::*;
+pub use number::*;
 pub use parser::*;
 pub use parser_ext::*;
 pub use parser_lexer::*;

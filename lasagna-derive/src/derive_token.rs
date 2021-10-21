@@ -234,6 +234,7 @@ fn source_token(input: DeriveInput) -> TokenStream {
                                 let next = lexer.next();
 
                                 if let Some(tok) = next.value {
+                                    #[allow(irrefutable_let_patterns)]
                                     if let #name::#variant_name(var) = tok {
                                         Ok(Spanned::new(var, next.span))
                                     } else {
