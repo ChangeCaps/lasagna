@@ -284,7 +284,7 @@ fn fields_named<'a>(
 
         quote_spanned! {name.span()=>
             #name: {
-                let field = <#ty as lasagna::Parse>::parse(parser)?;
+                let field = parser.parse()?;
 
                 #span
 
@@ -321,7 +321,7 @@ fn fields_unnamed<'a>(
 
         quote_spanned! {field.span()=>
             {
-                let field = <#ty as lasagna::Parse>::parse(parser)?;
+                let field = parser.parse()?;
 
                 #span
 
