@@ -72,25 +72,23 @@ impl<T, Term> DerefMut for VecTerminated<T, Term> {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct Punctuated<T, P, Term> {
+pub struct Punctuated<T, P> {
     span: Span,
     pub values: Vec<T>,
     pub punctuation: Vec<P>,
-    pub termination: Option<Term>,
 }
 
-impl<T, P, Term> Spanned for Punctuated<T, P, Term> {
+impl<T, P> Spanned for Punctuated<T, P> {
     #[inline]
     fn span(&self) -> Span {
         self.span
     }
 }
 
-impl<T, P, Term, Source> Parse for Punctuated<T, P, Term>
+impl<T, P, Source> Parse for Punctuated<T, P>
 where
     T: Parse<Source = Source>,
     P: Parse<Source = Source>,
-    Term: Token<Source>,
 {
     type Source = Source;
 
@@ -100,46 +98,27 @@ where
         let mut values = Vec::new();
         let mut punctuation = Vec::new();
 
-        let mut termination = None;
+        if !parser.is_empty() {
+            loop {
+                values.push(parser.parse()?);
 
-        while !parser.is_empty() {
-            let mut fork = parser.fork();
-
-            if let Ok(term) = fork.next::<Term>() {
-                *parser = fork;
-                termination = Some(term);
-
-                break;
+                if let Some(punct) = parser.try_parse() {
+                    punctuation.push(punct);
+                } else {
+                    break;
+                }
             }
-
-            values.push(parser.parse()?);
-
-            if parser.is_empty() {
-                break;
-            }
-
-            let mut fork = parser.fork();
-
-            if let Ok(term) = fork.next::<Term>() {
-                *parser = fork;
-                termination = Some(term);
-
-                break;
-            }
-
-            punctuation.push(parser.parse()?);
         }
 
         Ok(Self {
             span: span | parser.span(0),
             values,
             punctuation,
-            termination,
         })
     }
 }
 
-impl<T, P, Term> Deref for Punctuated<T, P, Term> {
+impl<T, P> Deref for Punctuated<T, P> {
     type Target = Vec<T>;
 
     #[inline]
@@ -148,7 +127,7 @@ impl<T, P, Term> Deref for Punctuated<T, P, Term> {
     }
 }
 
-impl<T, P, Term> DerefMut for Punctuated<T, P, Term> {
+impl<T, P> DerefMut for Punctuated<T, P> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.values

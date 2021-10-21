@@ -1,6 +1,6 @@
 use std::{iter::Peekable, str::Chars};
 
-use crate::{ParseError, Span, Spanned};
+use crate::{ParseError, Span};
 
 pub trait Named {
     const NAME: &'static str;

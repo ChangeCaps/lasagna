@@ -76,7 +76,7 @@ pub struct Statement {
 #[derive(Parse, Spanned, Debug)]
 pub struct Table {
     pub open: OpenBrace,
-    pub stmts: Punctuated<Statement, Comma, CloseBrace>,
+    pub stmts: Punctuated<Statement, Comma>,
     pub close: CloseBrace,
 }
 
@@ -85,7 +85,7 @@ fn main() {
     "foo" = {
        "bar" = "baz",
        "bar" = "baz"
-    },
+    }
 }"#;
 
     let mut parser = SkipWhitespace::new(CharsLexer::new(source.chars())).parse_as::<JsonToken>();
