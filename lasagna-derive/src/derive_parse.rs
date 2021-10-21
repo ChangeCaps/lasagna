@@ -7,11 +7,15 @@ use syn::{
     Attribute, Data, DeriveInput, Fields, FieldsNamed, FieldsUnnamed, Path, Token, Type,
 };
 
+syn::custom_keyword!(source);
+
 struct Source(Type);
 
 impl Parse for Source {
     #[inline]
     fn parse(input: ParseStream) -> syn::Result<Self> {
+        source::parse(input)?;
+
         <Token![=]>::parse(input)?;
 
         Ok(Self(Type::parse(input)?))
