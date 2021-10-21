@@ -18,6 +18,22 @@ where
     }
 }
 
+impl<T> Parse for Option<T>
+where
+    T: Parse,
+{
+    type Source = T::Source;
+
+    #[inline]
+    fn parse(parser: &mut impl Parser<Source = Self::Source>) -> Result<Self, ParseError> {
+        if let Ok(t) = parser.parse::<T>() {
+            Ok(Some(t))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
 pub trait Parser {
     type Source;
 
