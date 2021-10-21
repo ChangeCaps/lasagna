@@ -1,15 +1,27 @@
 use proc_macro2::TokenStream;
 use quote::{quote, quote_spanned};
 use syn::{
-    parse::{Parse, ParseStream, Parser},
+    parse::{Parse, ParseStream},
     parse_macro_input, parse_quote,
     spanned::Spanned,
     Attribute, Data, DeriveInput, Fields, FieldsNamed, FieldsUnnamed, Path, Token, Type,
 };
 
-#[derive(Default)]
+struct Source(Type);
+
+impl Parse for Source {
+    #[inline]
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        <Token![=]>::parse(input)?;
+
+        Ok(Self(Type::parse(input)?))
+    }
+}
+
+#[derive(Clone, Default)]
 struct Attributes {
     token: Option<Type>,
+    source: Option<Type>,
 }
 
 impl Attributes {
@@ -23,6 +35,17 @@ impl Attributes {
             {
                 if let Ok(ty) = attr.parse_args::<Type>() {
                     self.token = Some(ty);
+                }
+            }
+
+            if attr
+                .path
+                .get_ident()
+                .map(|ident| ident == "parse")
+                .unwrap_or(false)
+            {
+                if let Ok(Source(ty)) = attr.parse_args::<Source>() {
+                    self.source = Some(ty);
                 }
             }
         }
@@ -74,9 +97,13 @@ pub fn derive_parse(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let name = input.ident;
 
     let mut source = None;
-    let parse = parse(input.data, attrs, &mut source);
+    let parse = parse(input.data, attrs.clone(), &mut source);
 
     let (impl_generics, type_generics, where_clause) = input.generics.split_for_impl();
+
+    if attrs.source.is_some() {
+        source = attrs.source;
+    }
 
     let source = source.unwrap();
 
