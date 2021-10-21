@@ -16,10 +16,20 @@ pub enum JsonToken {
 
 #[derive(Named, Clone, Debug, PartialEq, Eq)]
 #[name = "<string>"]
-pub struct LitStr(pub String);
+pub struct LitStr {
+    span: Span,
+    pub string: String,
+}
+
+impl Spanned for LitStr {
+    #[inline]
+    fn span(&self) -> Span {
+        self.span
+    }
+}
 
 impl Token for LitStr {
-    fn lex(lexer: &mut impl Lexer<Output = char>) -> Result<Spanned<Self>, ParseError> {
+    fn lex(lexer: &mut impl Lexer<Output = char>) -> Result<Self, ParseError> {
         let mut span = lexer.span(0);
 
         lexer.expect('"')?;
@@ -29,7 +39,7 @@ impl Token for LitStr {
         loop {
             let next = lexer.next();
 
-            if let Some(next_char) = next.value {
+            if let Some(next_char) = next {
                 if next_char == '"' {
                     span |= lexer.span(0);
 
@@ -38,29 +48,32 @@ impl Token for LitStr {
                     string.push(next_char);
                 }
             } else {
-                return Err(ParseError::msg(next.span, "expected end to string"));
+                return Err(ParseError::msg(span, "expected end to string"));
             }
         }
 
-        Ok(Spanned::new(Self(string), span))
+        Ok(Self {
+            span: span | lexer.span(0),
+            string,
+        })
     }
 }
 
-#[derive(Parse, Debug)]
+#[derive(Parse, Spanned, Debug)]
 pub enum Value {
     String(LitStr),
     #[parse(peek = OpenBrace)]
     Table(Table),
 }
 
-#[derive(Parse, Debug)]
+#[derive(Parse, Spanned, Debug)]
 pub struct Statement {
     pub ident: LitStr,
     pub equal: Equal,
     pub value: Value,
 }
 
-#[derive(Parse, Debug)]
+#[derive(Parse, Spanned, Debug)]
 pub struct Table {
     pub open: OpenBrace,
     pub stmts: Punctuated<Statement, Comma, CloseBrace>,

@@ -117,7 +117,7 @@ pub fn derive_parse(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
             fn parse(
                 parser: &mut impl lasagna::Parser<Source = Self::Source>
-            ) -> Result<lasagna::Spanned<Self>, lasagna::ParseError> {
+            ) -> Result<Self, lasagna::ParseError> {
                 #parse
             }
         }
@@ -152,20 +152,14 @@ fn parse(data: Data, attrs: Attributes, source: &mut Option<Type>) -> TokenStrea
                         let fields = fields_named(&named, source);
 
                         quote_spanned! {variant.span()=>
-                            Spanned::new(
-                                Self::#name { #(#fields),* },
-                                span,
-                            )
+                            Self::#name { #(#fields),* },
                         }
                     }
                     Fields::Unnamed(unnamed) => {
                         let fields = fields_unnamed(&unnamed, source);
 
                         quote_spanned! {variant.span()=>
-                            Spanned::new(
-                                Self::#name(#(#fields),*),
-                                span,
-                            )
+                            Self::#name(#(#fields),*),
                         }
                     }
                     _ => unimplemented!(),
@@ -176,9 +170,6 @@ fn parse(data: Data, attrs: Attributes, source: &mut Option<Type>) -> TokenStrea
                         let mut fork = parser.fork();
 
                         if fork.next::<#peek>().is_ok() {
-                            #[allow(unused_mut)]
-                            let mut span;
-
                             return Ok(#var);
                         }
                     }
@@ -201,28 +192,14 @@ fn parse(data: Data, attrs: Attributes, source: &mut Option<Type>) -> TokenStrea
                 let fields = fields_named(&named, source);
 
                 quote! {
-                    let mut span;
-
-                    Ok(Spanned::new(
-                        Self {
-                            #(#fields),*
-                        },
-                        span,
-                    ))
+                    Ok(Self { #(#fields),* })
                 }
             }
             Fields::Unnamed(unnamed) => {
                 let fields = fields_unnamed(&unnamed, source);
 
                 quote! {
-                    let mut span;
-
-                    Ok(Spanned::new(
-                        Self {
-                            #(#fields),*
-                        },
-                        span,
-                    ))
+                    Ok(Self { #(#fields),* })
                 }
             }
             Fields::Unit => {
@@ -237,21 +214,18 @@ fn parse(data: Data, attrs: Attributes, source: &mut Option<Type>) -> TokenStrea
 
 fn try_variant(variant: TokenStream) -> TokenStream {
     quote! {
-        let variant = |parser| {
-            #[allow(unused_mut)]
-            let mut span;
+        {
+            let variant = |parser| {
+                Result::<_, lasagna::ParseError>::Ok(#variant)
+            };
 
-            Result::<_, lasagna::ParseError>::Ok(#variant)
-        };
+            let mut fork = parser.fork();
 
-        let mut fork = parser.fork();
+            if let Ok(variant) = variant(&mut fork) {
+                *parser = fork;
 
-        let variant = variant(&mut fork);
-
-        if variant.is_ok() {
-            *parser = fork;
-
-            return variant;
+                return Ok(variant);
+            }
         }
     }
 }
@@ -260,8 +234,6 @@ fn fields_named<'a>(
     fields: &'a FieldsNamed,
     source: &'a mut Option<Type>,
 ) -> impl Iterator<Item = TokenStream> + 'a {
-    let mut span_set = false;
-
     fields.named.iter().map(move |field| {
         let name = field.ident.as_ref().unwrap();
         let ty = &field.ty;
@@ -270,26 +242,8 @@ fn fields_named<'a>(
             *source = Some(parse_quote!(<#ty as lasagna::Parse>::Source));
         }
 
-        let span = if span_set {
-            quote! {
-                span |= field.span;
-            }
-        } else {
-            span_set = true;
-
-            quote! {
-                span = field.span;
-            }
-        };
-
         quote_spanned! {name.span()=>
-            #name: {
-                let field = parser.parse::<#ty>()?;
-
-                #span
-
-                field.value
-            }
+            #name: <#ty as lasagna::Parse>::parse(parser)?
         }
     })
 }
@@ -298,8 +252,6 @@ fn fields_unnamed<'a>(
     fields: &'a FieldsUnnamed,
     source: &'a mut Option<Type>,
 ) -> impl Iterator<Item = TokenStream> + 'a {
-    let mut span_set = false;
-
     fields.unnamed.iter().map(move |field| {
         let ty = &field.ty;
 
@@ -307,26 +259,8 @@ fn fields_unnamed<'a>(
             *source = Some(parse_quote!(<#ty as lasagna::Parse>::Source));
         }
 
-        let span = if span_set {
-            quote! {
-                span |= field.span;
-            }
-        } else {
-            span_set = true;
-
-            quote! {
-                span = field.span;
-            }
-        };
-
         quote_spanned! {field.span()=>
-            {
-                let field = parser.parse::<#ty>()?;
-
-                #span
-
-                field.value
-            }
+            <#ty as lasagna::Parse>::parse(parser)?
         }
     })
 }

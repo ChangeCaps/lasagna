@@ -1,9 +1,9 @@
-use crate::{Lexer, ParseError, Span, Spanned, Token};
+use crate::{Lexer, ParseError, Span, Token};
 
 pub trait Parse: Sized {
     type Source;
 
-    fn parse(parser: &mut impl Parser<Source = Self::Source>) -> Result<Spanned<Self>, ParseError>;
+    fn parse(parser: &mut impl Parser<Source = Self::Source>) -> Result<Self, ParseError>;
 }
 
 impl<T> Parse for Box<T>
@@ -13,10 +13,8 @@ where
     type Source = T::Source;
 
     #[inline]
-    fn parse(parser: &mut impl Parser<Source = Self::Source>) -> Result<Spanned<Self>, ParseError> {
-        let t = parser.parse()?;
-
-        Ok(Spanned::new(Box::new(t.value), t.span))
+    fn parse(parser: &mut impl Parser<Source = Self::Source>) -> Result<Self, ParseError> {
+        Ok(Box::new(parser.parse()?))
     }
 }
 
@@ -25,10 +23,10 @@ pub trait Parser {
 
     fn span(&mut self, length: usize) -> Span;
 
-    fn next<T: Token<Self::Source>>(&mut self) -> Result<Spanned<T>, ParseError>;
+    fn next<T: Token<Self::Source>>(&mut self) -> Result<T, ParseError>;
 
     #[inline]
-    fn peek<T: Token<Self::Source>>(&mut self) -> Option<Spanned<T>>
+    fn peek<T: Token<Self::Source>>(&mut self) -> Option<T>
     where
         Self: Sized,
     {
@@ -42,7 +40,7 @@ pub trait Parser {
     fn fork(&mut self) -> Self;
 
     #[inline]
-    fn parse<T: Parse<Source = Self::Source>>(&mut self) -> Result<Spanned<T>, ParseError>
+    fn parse<T: Parse<Source = Self::Source>>(&mut self) -> Result<T, ParseError>
     where
         Self: Sized,
     {
@@ -50,7 +48,7 @@ pub trait Parser {
     }
 
     #[inline]
-    fn try_parse<T: Parse<Source = Self::Source>>(&mut self) -> Option<Spanned<T>>
+    fn try_parse<T: Parse<Source = Self::Source>>(&mut self) -> Option<T>
     where
         Self: Sized,
     {
@@ -86,7 +84,6 @@ impl<L> SkipWhitespace<L> {
         while self
             .lexer
             .peek()
-            .value
             .map(|c| c.is_whitespace())
             .unwrap_or(false)
         {
@@ -109,7 +106,7 @@ where
     }
 
     #[inline]
-    fn next<T: Token<Self::Source>>(&mut self) -> Result<Spanned<T>, ParseError> {
+    fn next<T: Token<Self::Source>>(&mut self) -> Result<T, ParseError> {
         self.skip_whitespace();
 
         T::lex(&mut self.lexer)

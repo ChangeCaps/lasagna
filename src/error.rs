@@ -1,4 +1,4 @@
-use crate::{Span, Spanned};
+use crate::Span;
 
 #[derive(Clone, Debug)]
 pub enum ParseError {
@@ -7,14 +7,18 @@ pub enum ParseError {
         expected: Vec<String>,
     },
     Expected {
-        found: Spanned<String>,
+        span: Span,
+        found: String,
         expected: String,
     },
     UnexpectedEof {
         span: Span,
         expected: String,
     },
-    Message(Spanned<String>),
+    Message {
+        span: Span,
+        msg: String,
+    },
 }
 
 impl ParseError {
@@ -28,7 +32,10 @@ impl ParseError {
 
     #[inline]
     pub fn msg(span: Span, msg: impl Into<String>) -> Self {
-        Self::Message(Spanned::new(msg.into(), span))
+        Self::Message {
+            span,
+            msg: msg.into(),
+        }
     }
 }
 
@@ -49,8 +56,16 @@ impl std::fmt::Display for ParseError {
 
                 write!(f, "' at line: {} column: {}", span.line, span.column)
             }
-            Self::Expected { found, expected } => {
-                write!(f, "found {}, expected '{}'", found, expected)
+            Self::Expected {
+                span,
+                found,
+                expected,
+            } => {
+                write!(
+                    f,
+                    "found {} as line: {} column: {}, expected '{}'",
+                    found, span.line, span.column, expected
+                )
             }
             Self::UnexpectedEof { span, expected } => {
                 write!(
@@ -59,8 +74,8 @@ impl std::fmt::Display for ParseError {
                     span.line, span.column, expected
                 )
             }
-            Self::Message(message) => {
-                write!(f, "{}", message)
+            Self::Message { span, msg } => {
+                write!(f, "{} at line: {} column {}", msg, span.line, span.column)
             }
         }
     }

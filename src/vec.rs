@@ -1,6 +1,6 @@
 use std::ops::{Deref, DerefMut};
 
-use crate::{Parse, ParseError, Parser, Spanned, Token};
+use crate::{Parse, ParseError, Parser, Span, Spanned, Token};
 
 /// Parsable [`Vec`] that is terminated by a token.
 ///
@@ -8,8 +8,16 @@ use crate::{Parse, ParseError, Parser, Spanned, Token};
 /// Term is not consumed.
 #[derive(Clone, Debug, Default)]
 pub struct VecTerminated<T, Term> {
-    pub vec: Vec<Spanned<T>>,
-    pub termination: Option<Spanned<Term>>,
+    span: Span,
+    pub vec: Vec<T>,
+    pub termination: Option<Term>,
+}
+
+impl<T, Term> Spanned for VecTerminated<T, Term> {
+    #[inline]
+    fn span(&self) -> Span {
+        self.span
+    }
 }
 
 impl<T, Term, Source> Parse for VecTerminated<T, Term>
@@ -20,8 +28,8 @@ where
     type Source = Source;
 
     #[inline]
-    fn parse(parser: &mut impl Parser<Source = Source>) -> Result<Spanned<Self>, ParseError> {
-        let mut span = parser.span(0);
+    fn parse(parser: &mut impl Parser<Source = Source>) -> Result<Self, ParseError> {
+        let span = parser.span(0);
         let mut vec = Vec::new();
 
         let mut termination = None;
@@ -30,8 +38,6 @@ where
             let mut fork = parser.fork();
 
             if let Ok(term) = fork.next::<Term>() {
-                span |= term.span;
-
                 termination = Some(term);
 
                 break;
@@ -40,12 +46,16 @@ where
             vec.push(parser.parse()?);
         }
 
-        Ok(Spanned::new(Self { vec, termination }, span))
+        Ok(Self {
+            span: span | parser.span(0),
+            vec,
+            termination,
+        })
     }
 }
 
 impl<T, Term> Deref for VecTerminated<T, Term> {
-    type Target = Vec<Spanned<T>>;
+    type Target = Vec<T>;
 
     #[inline]
     fn deref(&self) -> &Self::Target {
@@ -62,9 +72,17 @@ impl<T, Term> DerefMut for VecTerminated<T, Term> {
 
 #[derive(Clone, Debug, Default)]
 pub struct Punctuated<T, P, Term> {
-    pub values: Vec<Spanned<T>>,
-    pub punctuation: Vec<Spanned<P>>,
-    pub termination: Option<Spanned<Term>>,
+    span: Span,
+    pub values: Vec<T>,
+    pub punctuation: Vec<P>,
+    pub termination: Option<Term>,
+}
+
+impl<T, P, Term> Spanned for Punctuated<T, P, Term> {
+    #[inline]
+    fn span(&self) -> Span {
+        self.span
+    }
 }
 
 impl<T, P, Term, Source> Parse for Punctuated<T, P, Term>
@@ -76,7 +94,7 @@ where
     type Source = Source;
 
     #[inline]
-    fn parse(parser: &mut impl Parser<Source = Source>) -> Result<Spanned<Self>, ParseError> {
+    fn parse(parser: &mut impl Parser<Source = Source>) -> Result<Self, ParseError> {
         let mut span = parser.span(0);
         let mut values = Vec::new();
         let mut punctuation = Vec::new();
@@ -87,8 +105,6 @@ where
             let mut fork = parser.fork();
 
             if let Ok(term) = fork.next::<Term>() {
-                span |= term.span;
-
                 termination = Some(term);
 
                 break;
@@ -103,8 +119,6 @@ where
             let mut fork = parser.fork();
 
             if let Ok(term) = fork.next::<Term>() {
-                span |= term.span;
-
                 termination = Some(term);
 
                 break;
@@ -113,19 +127,17 @@ where
             punctuation.push(parser.parse()?);
         }
 
-        Ok(Spanned::new(
-            Self {
-                values,
-                punctuation,
-                termination,
-            },
+        Ok(Self {
             span,
-        ))
+            values,
+            punctuation,
+            termination,
+        })
     }
 }
 
 impl<T, P, Term> Deref for Punctuated<T, P, Term> {
-    type Target = Vec<Spanned<T>>;
+    type Target = Vec<T>;
 
     #[inline]
     fn deref(&self) -> &Self::Target {

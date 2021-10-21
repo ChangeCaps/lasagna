@@ -66,12 +66,10 @@ fn match_string_token(input: DeriveInput, attrs: Attributes) -> TokenStream {
         quote! {
             impl lasagna::Token<char> for #name {
                 #[inline]
-                fn lex(lexer: &mut impl lasagna::Lexer<Output = char>) -> Result<lasagna::Spanned<Self>, lasagna::ParseError> {
-                    let mut span = lexer.span(0);
-
+                fn lex(lexer: &mut impl lasagna::Lexer<Output = char>) -> Result<Self, lasagna::ParseError> {
                     #match_string
 
-                    Ok(lasagna::Spanned::new(Self, span))
+                    Ok(Self)
                 }
             }
 
@@ -81,7 +79,7 @@ fn match_string_token(input: DeriveInput, attrs: Attributes) -> TokenStream {
                 #[inline]
                 fn parse(
                     parser: &mut impl lasagna::Parser<Source = Self::Source>
-                ) -> Result<lasagna::Spanned<Self>, lasagna::ParseError> {
+                ) -> Result<Self, lasagna::ParseError> {
                     parser.next::<Self>()
                 }
             }
@@ -96,16 +94,18 @@ fn match_string(match_string: &LitStr) -> TokenStream {
         for c in #match_string.chars() {
             let next = lasagna::Lexer::next(lexer);
 
-            if let Some(next_char) = next.value {
+            if let Some(next_char) = next {
                 if next_char != c {
                     return Err(lasagna::ParseError::Expected {
-                        found: lasagna::Spanned::new(String::from(next_char), next.span),
+                        span: lasagna::Lexer::span(lexer, 0),
+                        found: String::from(next_char),
                         expected: String::from(c),
                     });
                 }
             } else {
                 return Err(lasagna::ParseError::Expected {
-                    found: lasagna::Spanned::new(String::from("<eof>"), next.span),
+                    span: lasagna::Lexer::span(lexer, 0),
+                    found: String::from("<eof>"),
                     expected: String::from(c),
                 });
             }
@@ -141,25 +141,30 @@ fn source_token(input: DeriveInput) -> TokenStream {
                         {
                             fn variant(
                                 lexer: &mut impl lasagna::Lexer<Output = char>
-                            ) -> Result<lasagna::Span, lasagna::ParseError> {
-                                let span = lasagna::Lexer::span(lexer, 0);
-
+                            ) -> Result<(), lasagna::ParseError> {
                                 #match_string
 
-                                Ok(span)
+                                Ok(())
                             } 
 
-                            if let Ok(span) = variant(&mut fork) {
+                            if variant(&mut fork).is_ok() {
                                 *lexer = fork;
 
-                                return Ok(lasagna::Spanned::new(Self::#variant_name, span));
+                                return Ok(Self::#variant_name);
                             }
                         }
                     });
 
                     token_variants.push(quote_spanned! {variant_name.span()=>
                         #[derive(Clone, Copy, Default, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-                        pub struct #variant_name;
+                        pub struct #variant_name(lasagna::Span);
+
+                        impl lasagna::Spanned for #variant_name {
+                            #[inline]
+                            fn span(&self) -> lasagna::Span {
+                                self.0
+                            }
+                        }
 
                         impl lasagna::Named for #variant_name {
                             const NAME: &'static str = #string;
@@ -169,20 +174,21 @@ fn source_token(input: DeriveInput) -> TokenStream {
                             #[inline]
                             fn lex(
                                 lexer: &mut impl lasagna::Lexer<Output = #name>
-                            ) -> Result<lasagna::Spanned<Self>, lasagna::ParseError> {
+                            ) -> Result<Self, lasagna::ParseError> {
+                                let span = lexer.span(0);
                                 let next = lexer.next();
 
-                                if let Some(next_source) = next.value {
+                                if let Some(next_source) = next {
                                     if let #name::#variant_name = next_source {
-                                        Ok(lasagna::Spanned::new(Self, next.span))
+                                        Ok(Self(span | lexer.span(0)))
                                     } else {
                                         Err(lasagna::ParseError::msg(
-                                            next.span, 
+                                            span | lexer.span(0), 
                                             format!("expected '{}'", <#variant_name as lasagna::Named>::NAME)
                                         ))
                                     }
                                 } else {
-                                    Err(lasagna::ParseError::eof(next.span, stringify!(#variant_name)))
+                                    Err(lasagna::ParseError::eof(span, stringify!(#variant_name)))
                                 }
                             }
                         }
@@ -193,7 +199,7 @@ fn source_token(input: DeriveInput) -> TokenStream {
                             #[inline]
                             fn parse(
                                 parser: &mut impl lasagna::Parser<Source = Self::Source>
-                            ) -> Result<lasagna::Spanned<Self>, lasagna::ParseError> {
+                            ) -> Result<Self, lasagna::ParseError> {
                                 parser.next()
                             }
                         }
@@ -221,7 +227,7 @@ fn source_token(input: DeriveInput) -> TokenStream {
                         if let Ok(tok) = <#field_ty as lasagna::Token<char>>::lex(&mut fork) {
                             *lexer = fork;
 
-                            return Ok(lasagna::Spanned::new(Self::#variant_name(tok.value), tok.span));
+                            return Ok(Self::#variant_name(tok));
                         }
                     });
 
@@ -230,21 +236,22 @@ fn source_token(input: DeriveInput) -> TokenStream {
                             #[inline]
                             fn lex(
                                 lexer: &mut impl Lexer<Output = #name>
-                            ) -> Result<lasagna::Spanned<Self>, lasagna::ParseError> {
+                            ) -> Result<Self, lasagna::ParseError> {
+                                let span = lexer.span(0);
                                 let next = lexer.next();
 
-                                if let Some(tok) = next.value {
+                                if let Some(tok) = next {
                                     #[allow(irrefutable_let_patterns)]
                                     if let #name::#variant_name(var) = tok {
-                                        Ok(Spanned::new(var, next.span))
+                                        Ok(var)
                                     } else {
                                         Err(lasagna::ParseError::msg(
-                                            next.span,
+                                            span | lexer.span(0),
                                             format!("expected '{}'", <#field_ty as lasagna::Named>::NAME),
                                         ))
                                     }
                                 } else {
-                                    Err(lasagna::ParseError::eof(next.span, <#field_ty as lasagna::Named>::NAME))
+                                    Err(lasagna::ParseError::eof(span, <#field_ty as lasagna::Named>::NAME))
                                 }
                             }
                         }
@@ -255,7 +262,7 @@ fn source_token(input: DeriveInput) -> TokenStream {
                             #[inline]
                             fn parse(
                                 parser: &mut impl Parser<Source = Self::Source>,
-                            ) -> Result<lasagna::Spanned<Self>, lasagna::ParseError> {
+                            ) -> Result<Self, lasagna::ParseError> {
                                 parser.next()
                             }
                         }
@@ -274,7 +281,7 @@ fn source_token(input: DeriveInput) -> TokenStream {
 
                 impl lasagna::Token<char> for #name {
                     #[inline]
-                    fn lex(lexer: &mut impl Lexer<Output = char>) -> Result<lasagna::Spanned<Self>, lasagna::ParseError> {
+                    fn lex(lexer: &mut impl Lexer<Output = char>) -> Result<Self, lasagna::ParseError> {
                         #(#lex_variant)*
 
                         Err(lasagna::ParseError::eof(lexer.span(0), <#name as lasagna::Named>::NAME))
@@ -287,7 +294,7 @@ fn source_token(input: DeriveInput) -> TokenStream {
                     #[inline]
                     fn parse(
                         parser: &mut impl Parser<Source = Self::Source>
-                    ) -> Result<lasagna::Spanned<Self>, lasagna::ParseError> {
+                    ) -> Result<Self, lasagna::ParseError> {
                         parser.next()
                     }
                 }

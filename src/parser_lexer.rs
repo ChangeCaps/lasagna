@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::{Lexer, Named, Parse, ParseError, Parser, Span, Spanned, Token};
+use crate::{Lexer, Named, Parse, ParseError, Parser, Span, Token};
 
 pub struct LexerParser<L>(L);
 
@@ -23,7 +23,7 @@ where
     }
 
     #[inline]
-    fn next<T: Token<Self::Source>>(&mut self) -> Result<Spanned<T>, ParseError> {
+    fn next<T: Token<Self::Source>>(&mut self) -> Result<T, ParseError> {
         T::lex(&mut self.0)
     }
 
@@ -40,7 +40,7 @@ where
 
 pub struct ParserLexer<T, P> {
     parser: P,
-    peek: Option<Spanned<T>>,
+    peek: Option<T>,
 }
 
 impl<T, P> ParserLexer<T, P> {
@@ -63,53 +63,52 @@ where
     }
 
     #[inline]
-    fn next(&mut self) -> Spanned<Option<Self::Output>> {
+    fn next(&mut self) -> Option<Self::Output> {
         if let Some(t) = self.peek.take() {
-            return Spanned::new(Some(t.value), t.span);
+            return Some(t);
         }
 
         if self.parser.is_empty() {
-            Spanned::new(None, self.span(0))
+            None
         } else {
             if let Ok(t) = T::parse(&mut self.parser) {
-                Spanned::new(Some(t.value), t.span)
+                Some(t)
             } else {
-                Spanned::new(None, self.span(0))
+                None
             }
         }
     }
 
     #[inline]
-    fn peek(&mut self) -> Spanned<Option<&Self::Output>> {
+    fn peek(&mut self) -> Option<&Self::Output> {
         if let Some(ref peek) = self.peek {
-            Spanned::new(Some(&peek.value), peek.span)
+            Some(&peek)
         } else {
-            let next = self.next();
-            if let Some(t) = next.value {
-                self.peek = Some(Spanned::new(t, next.span));
+            if let Some(t) = self.next() {
+                self.peek = Some(t);
 
-                Spanned::new(Some(&self.peek.as_ref().unwrap().value), next.span)
+                self.peek.as_ref()
             } else {
-                Spanned::new(None, next.span)
+                None
             }
         }
     }
 
     #[inline]
     fn expect(&mut self, expected: Self::Output) -> Result<(), ParseError> {
-        let next = self.next();
-
-        if let Some(t) = next.value {
+        let span = self.span(0);
+        if let Some(t) = self.next() {
             if t == expected {
                 Ok(())
             } else {
                 Err(ParseError::Expected {
-                    found: Spanned::new(t.to_string(), next.span),
+                    span: span | self.span(0),
+                    found: t.to_string(),
                     expected: expected.to_string(),
                 })
             }
         } else {
-            Err(ParseError::eof(next.span, expected.to_string()))
+            Err(ParseError::eof(self.span(0), expected.to_string()))
         }
     }
 

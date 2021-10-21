@@ -1,10 +1,10 @@
 use std::{
     cmp::Ordering,
-    ops::{BitOr, BitOrAssign, Deref, DerefMut},
+    ops::{BitOr, BitOrAssign},
 };
 
 /// A struct that denotes a location in the source of a file.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Span {
     /// Line in source.
     pub line: usize,
@@ -55,55 +55,13 @@ impl BitOrAssign for Span {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Spanned<T> {
-    pub value: T,
-    pub span: Span,
+pub trait Spanned {
+    fn span(&self) -> Span;
 }
 
-impl<T> Spanned<T> {
+impl<T: Spanned> Spanned for Box<T> {
     #[inline]
-    pub fn new(value: T, span: Span) -> Self {
-        Self { span, value }
-    }
-}
-
-impl<T> Deref for Spanned<T> {
-    type Target = T;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.value
-    }
-}
-
-impl<T> DerefMut for Spanned<T> {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.value
-    }
-}
-
-impl<T> std::fmt::Debug for Spanned<T>
-where
-    T: std::fmt::Debug,
-{
-    #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.value.fmt(f)
-    }
-}
-
-impl<T> std::fmt::Display for Spanned<T>
-where
-    T: std::fmt::Display,
-{
-    #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "'{}' at line: {}, column: {}",
-            self.value, self.span.line, self.span.column
-        )
+    fn span(&self) -> Span {
+        self.as_ref().span()
     }
 }

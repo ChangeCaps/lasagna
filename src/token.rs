@@ -7,7 +7,7 @@ pub trait Named {
 }
 
 pub trait Token<Source = char>: Sized + Named {
-    fn lex(lexer: &mut impl Lexer<Output = Source>) -> Result<Spanned<Self>, ParseError>;
+    fn lex(lexer: &mut impl Lexer<Output = Source>) -> Result<Self, ParseError>;
 }
 
 pub trait Lexer {
@@ -16,9 +16,9 @@ pub trait Lexer {
     /// Returns a [`Span`] at the cursor of the lexer.
     fn span(&mut self, length: usize) -> Span;
 
-    fn next(&mut self) -> Spanned<Option<Self::Output>>;
+    fn next(&mut self) -> Option<Self::Output>;
 
-    fn peek(&mut self) -> Spanned<Option<&Self::Output>>;
+    fn peek(&mut self) -> Option<&Self::Output>;
 
     #[inline]
     fn is_empty(&mut self) -> bool {
@@ -69,10 +69,8 @@ impl<'a> Lexer for CharsLexer<'a> {
     }
 
     #[inline]
-    fn next(&mut self) -> Spanned<Option<char>> {
+    fn next(&mut self) -> Option<char> {
         if let Some(c) = self.chars.next() {
-            let span = self.span(1);
-
             self.offset += 1;
 
             if c == '\n' {
@@ -82,40 +80,35 @@ impl<'a> Lexer for CharsLexer<'a> {
                 self.column += 1;
             }
 
-            Spanned::new(Some(c), span)
+            Some(c)
         } else {
-            Spanned::new(None, self.span(0))
+            None
         }
     }
 
     #[inline]
-    fn peek(&mut self) -> Spanned<Option<&char>> {
-        let mut span = self.span(1);
-
+    fn peek(&mut self) -> Option<&char> {
         if let Some(c) = self.chars.peek() {
-            Spanned::new(Some(c), span)
+            Some(c)
         } else {
-            span.length = 0;
-
-            Spanned::new(None, span)
+            None
         }
     }
 
     #[inline]
     fn expect(&mut self, expected: Self::Output) -> Result<(), ParseError> {
-        let next = self.next();
-
-        if let Some(next_char) = next.value {
+        if let Some(next_char) = self.next() {
             if next_char == expected {
                 Ok(())
             } else {
                 Err(ParseError::Expected {
-                    found: Spanned::new(String::from(next_char), next.span),
+                    span: self.span(0),
+                    found: String::from(next_char),
                     expected: String::from(expected),
                 })
             }
         } else {
-            Err(ParseError::eof(next.span, expected))
+            Err(ParseError::eof(self.span(0), expected))
         }
     }
 
