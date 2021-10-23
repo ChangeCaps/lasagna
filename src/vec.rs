@@ -38,7 +38,6 @@ where
             let mut fork = parser.fork();
 
             if let Ok(term) = fork.next::<Term>() {
-                *parser = fork;
                 termination = Some(term);
 
                 break;
