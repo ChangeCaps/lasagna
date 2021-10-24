@@ -57,6 +57,13 @@ impl BitOrAssign for Span {
     }
 }
 
+impl std::fmt::Display for Span {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "line: {} column: {}", self.line, self.column)
+    }
+}
+
 pub trait Spanned {
     fn span(&self) -> Span;
 }
