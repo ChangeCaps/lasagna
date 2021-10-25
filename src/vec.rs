@@ -99,7 +99,15 @@ where
 
         if !parser.is_empty() {
             loop {
-                values.push(parser.parse()?);
+                if values.is_empty() {
+                    if let Some(value) = parser.try_parse() {
+                        values.push(value);
+                    } else {
+                        break;
+                    }
+                } else {
+                    values.push(parser.parse()?);
+                }
 
                 if let Some(punct) = parser.try_parse() {
                     punctuation.push(punct);
