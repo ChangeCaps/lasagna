@@ -98,7 +98,7 @@ where
     fn parse(parser: &mut impl Parser<Source = Self::Source>) -> Result<Self, ParseError> {
         let span = parser.span(0);
 
-        if let Ok(t) = parser.try_parse::<T>() {
+        if let Some(t) = parser.try_parse::<T>() {
             Ok(Self {
                 span: span | parser.span(0),
                 value: Some(t),
