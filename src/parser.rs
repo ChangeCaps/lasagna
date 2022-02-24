@@ -1,95 +1,119 @@
-use crate::{Lexer, ParseError, Span, Token};
+use crate::{Error, Lexer, Span, Token, TokenKind};
 
-pub trait Parse: Sized {
-    type Source;
+pub type ParseStart<T> = &'static StartTokens<'static, <T as Token>::Kind>;
 
-    fn parse(parser: &mut impl Parser<Source = Self::Source>) -> Result<Self, ParseError>;
+#[derive(Clone, Copy, Debug)]
+pub enum StartTokens<'a, T: TokenKind> {
+    All,
+    Any(&'a [&'a StartTokens<'a, T>]),
+    One(&'a StartTokens<'a, T>),
+    Token(&'a T),
 }
 
-impl<T> Parse for Box<T>
-where
-    T: Parse,
-{
-    type Source = T::Source;
+impl<'a, T: TokenKind> StartTokens<'a, T> {
+    pub fn contains(&self, kind: &T) -> bool {
+        match self {
+            Self::All => true,
+            &Self::Any(kinds) => {
+                for tok in kinds {
+                    if tok.contains(kind) {
+                        return true;
+                    }
+                }
 
-    #[inline]
-    fn parse(parser: &mut impl Parser<Source = Self::Source>) -> Result<Self, ParseError> {
-        Ok(Box::new(parser.parse()?))
-    }
-}
-
-impl<T> Parse for Option<T>
-where
-    T: Parse,
-{
-    type Source = T::Source;
-
-    #[inline]
-    fn parse(parser: &mut impl Parser<Source = Self::Source>) -> Result<Self, ParseError> {
-        if let Ok(t) = parser.parse::<T>() {
-            Ok(Some(t))
-        } else {
-            Ok(None)
+                false
+            }
+            &Self::One(tok) => tok.contains(kind),
+            &Self::Token(tok) => tok == kind,
         }
     }
+
+    pub fn append_vec(&self, vec: &mut Vec<&'a T>) {
+        match self {
+            &Self::Any(kinds) => {
+                for kind in kinds {
+                    kind.append_vec(vec);
+                }
+            }
+            &Self::One(kind) => kind.append_vec(vec),
+            &Self::Token(kind) => {
+                if !vec.contains(&kind) {
+                    vec.push(kind);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn to_vec(&self) -> Vec<&'a T> {
+        let mut vec = Vec::new();
+        self.append_vec(&mut vec);
+        vec
+    }
 }
 
-pub trait Parser {
-    type Source;
+pub trait Parse: Sized {
+    type Token: Token;
 
+    const START: ParseStart<Self::Token>;
+
+    fn parse(parser: &mut impl Parser<Self::Token>) -> Result<Self, Error>;
+
+    #[allow(unused)]
+    fn is_next(parser: &mut impl Parser<Self::Token>) -> Option<bool> {
+        Some(Self::START.contains(&parser.peek().ok()??.kind()))
+    }
+}
+
+pub trait Parser<T> {
     fn span(&mut self, length: usize) -> Span;
 
-    fn next<T: Token<Self::Source>>(&mut self) -> Result<T, ParseError>;
+    fn next(&mut self) -> Result<T, Error>;
 
-    #[inline]
-    fn peek<T: Token<Self::Source>>(&mut self) -> Option<T>
-    where
-        Self: Sized,
-    {
-        let mut fork = self.fork();
-
-        fork.next().ok()
-    }
+    fn peek(&mut self) -> Result<Option<&T>, Error>;
 
     fn is_empty(&mut self) -> bool;
 
     fn fork(&mut self) -> Self;
 
-    #[inline]
-    fn parse<T: Parse<Source = Self::Source>>(&mut self) -> Result<T, ParseError>
+    fn parse<P: Parse<Token = T>>(&mut self) -> Result<P, Error>
     where
         Self: Sized,
     {
-        T::parse(self)
+        P::parse(self)
     }
 
-    #[inline]
-    fn try_parse<T: Parse<Source = Self::Source>>(&mut self) -> Option<T>
+    fn try_parse<P: Parse<Token = T>>(&mut self) -> Result<Option<P>, Error>
     where
         Self: Sized,
     {
-        let mut fork = self.fork();
+        match P::is_next(self) {
+            Some(true) => Ok(Some(P::parse(self)?)),
+            Some(false) => Ok(None),
+            None => {
+                let mut fork = self.fork();
 
-        if let Ok(t) = T::parse(&mut fork) {
-            *self = fork;
+                let parse = P::parse(&mut fork)?;
 
-            Some(t)
-        } else {
-            None
+                *self = fork;
+
+                Ok(Some(parse))
+            }
         }
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct SkipWhitespace<L> {
+pub struct SkipWhitespace<L, T> {
     lexer: L,
+    peek: Option<T>,
 }
 
 /// [`Parser`] that skips whitespace between tokens.
-impl<L> SkipWhitespace<L> {
+impl<L, T> SkipWhitespace<L, T> {
     #[inline]
     pub fn new(lexer: L) -> Self {
-        Self { lexer }
+        Self { lexer, peek: None }
     }
 
     #[inline]
@@ -108,34 +132,43 @@ impl<L> SkipWhitespace<L> {
     }
 }
 
-impl<L> Parser for SkipWhitespace<L>
+impl<L, T> Parser<T> for SkipWhitespace<L, T>
 where
     L: Lexer<Output = char>,
+    T: Token<char>,
 {
-    type Source = char;
-
-    #[inline]
     fn span(&mut self, length: usize) -> Span {
         self.skip_whitespace();
 
         self.lexer.span(length)
     }
 
-    #[inline]
-    fn next<T: Token<Self::Source>>(&mut self) -> Result<T, ParseError> {
-        self.skip_whitespace();
-
-        T::lex(&mut self.lexer)
+    fn next(&mut self) -> Result<T, Error> {
+        if let Some(peek) = self.peek.take() {
+            Ok(peek)
+        } else {
+            T::lex(&mut self.lexer)
+        }
     }
 
-    #[inline]
+    fn peek(&mut self) -> Result<Option<&T>, Error> {
+        if let Some(ref token) = self.peek {
+            Ok(Some(token))
+        } else {
+            self.skip_whitespace();
+
+            self.peek = Some(T::lex(&mut self.lexer)?);
+
+            Ok(self.peek.as_ref())
+        }
+    }
+
     fn is_empty(&mut self) -> bool {
         self.skip_whitespace();
 
         self.lexer.is_empty()
     }
 
-    #[inline]
     fn fork(&mut self) -> Self {
         Self::new(self.lexer.fork())
     }

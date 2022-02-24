@@ -7,6 +7,8 @@ use syn::{
     Attribute, Data, DeriveInput, Fields, FieldsNamed, FieldsUnnamed, Path, Token, Type,
 };
 
+const NO_FIELDS: &str = "type must have a least one Spanned field";
+
 syn::custom_keyword!(source);
 
 struct Source(Type);
@@ -100,24 +102,20 @@ pub fn derive_parse(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
     let name = input.ident;
 
-    let mut source = None;
-    let parse = parse(input.data, attrs.clone(), &mut source);
+    let mut token = None;
+    let (parse, start) = parse(input.data, attrs.clone(), &mut token);
 
     let (impl_generics, type_generics, where_clause) = input.generics.split_for_impl();
 
-    if attrs.source.is_some() {
-        source = attrs.source;
-    }
-
-    let source = source.unwrap();
-
     let expanded = quote! {
-        impl #impl_generics lasagna::Parse for #name #type_generics #where_clause {
-            type Source = #source;
+        impl #impl_generics ::lasagna::Parse for #name #type_generics #where_clause {
+            type Token = #token;
+
+            const START: ::lasagna::ParseStart<Self::Token> = #start;
 
             fn parse(
-                parser: &mut impl lasagna::Parser<Source = Self::Source>
-            ) -> Result<Self, lasagna::ParseError> {
+                parser: &mut impl ::lasagna::Parser<Self::Token>
+            ) -> Result<Self, ::lasagna::Error> {
                 #parse
             }
         }
@@ -126,141 +124,167 @@ pub fn derive_parse(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     proc_macro::TokenStream::from(expanded)
 }
 
-fn parse(data: Data, attrs: Attributes, source: &mut Option<Type>) -> TokenStream {
-    if let Some(ty) = attrs.token {
-        *source = Some(ty);
-
-        return quote! {
-            parser.next::<Self>()
-        };
-    }
-
+fn parse(data: Data, attrs: Attributes, token: &mut Option<Type>) -> (TokenStream, TokenStream) {
     match data {
         Data::Enum(data) => {
-            let mut names = Vec::new();
+            let parse = data.variants.iter().map(|variant| {
+                let is_next = variant
+                    .fields
+                    .iter()
+                    .next()
+                    .map(|field| {
+                        let ty = &field.ty;
 
-            let variants = data.variants.iter().map(|variant| {
-                let name = &variant.ident;
+                        quote!(<#ty as ::lasagna::Parse>::is_next(parser))
+                    })
+                    .expect(NO_FIELDS);
 
-                names.push(name.to_string());
+                let variant_name = &variant.ident;
 
-                let mut var_attrs = VariantAttributes::default();
-                var_attrs.from_attrs(&variant.attrs);
+                let parse_variant = match variant.fields {
+                    Fields::Named(ref named) => {
+                        let parse_fields = parse_fields_named(named, token);
 
-                let var = match &variant.fields {
-                    Fields::Named(named) => {
-                        let fields = fields_named(&named, source);
-
-                        quote_spanned! {variant.span()=>
-                            Self::#name { #(#fields),* },
+                        quote! {
+                            ::std::result::Result::Ok(
+                                Self::#variant_name {
+                                    #(#parse_fields),*
+                                }
+                            )
                         }
                     }
-                    Fields::Unnamed(unnamed) => {
-                        let fields = fields_unnamed(&unnamed, source);
+                    Fields::Unnamed(ref unnamed) => {
+                        let parse_fields = parse_fields_unnamed(unnamed, token);
 
-                        quote_spanned! {variant.span()=>
-                            Self::#name(#(#fields),*),
+                        quote! {
+                            ::std::result::Result::Ok(
+                                Self::#variant_name(#(#parse_fields),*)
+                            )
                         }
                     }
-                    _ => unimplemented!(),
+                    Fields::Unit => unimplemented!("{}", NO_FIELDS),
                 };
 
-                if let Some(peek) = &var_attrs.peek {
-                    quote! {
-                        let mut fork = parser.fork();
-
-                        if fork.next::<#peek>().is_ok() {
-                            return Ok(#var);
-                        }
+                quote! {
+                    match #is_next {
+                        ::std::option::Option::Some(true) => return #parse_variant,
+                        ::std::option::Option::Some(false) => {},
+                        _ => {},
                     }
-                } else {
-                    try_variant(var)
                 }
             });
 
-            quote! {
-                #(#variants)*
+            let start = data.variants.iter().map(|variant| {
+                variant
+                    .fields
+                    .iter()
+                    .next()
+                    .map(|field| {
+                        let ty = &field.ty;
 
-                Err(lasagna::ParseError::ExpectedOne {
-                    span: parser.span(0),
-                    expected: vec![#(String::from(#names)),*],
-                })
-            }
+                        quote!(<#ty as ::lasagna::Parse>::START)
+                    })
+                    .expect(NO_FIELDS)
+            });
+
+            let parse = quote! {
+                #(#parse)*
+
+                let span = parser.span(0);
+
+                if let Some(tok) = parser.peek()? {
+                    ::std::result::Result::Err(
+                        ::lasagna::Error::expected_one(span, &Self::START.to_vec(), tok)
+                    )
+                } else {
+                    ::std::result::Result::Err(
+                        ::lasagna::Error::expected_one(span, &Self::START.to_vec(), "eof")
+                    )
+                }
+            };
+
+            let start = quote!(&::lasagna::StartTokens::Any(&[#(#start),*]));
+
+            (parse, start)
         }
         Data::Struct(data) => match data.fields {
             Fields::Named(named) => {
-                let fields = fields_named(&named, source);
+                let parse_fields = parse_fields_named(&named, token);
 
-                quote! {
-                    Ok(Self { #(#fields),* })
-                }
+                let parse = quote! {
+                    Ok(Self {
+                        #(#parse_fields),*
+                    })
+                };
+
+                let is_next = named
+                    .named
+                    .first()
+                    .map(|field| {
+                        let ty = &field.ty;
+
+                        quote!(<#ty as ::lasagna::Parse>::START)
+                    })
+                    .expect(NO_FIELDS);
+
+                (parse, is_next)
             }
             Fields::Unnamed(unnamed) => {
-                let fields = fields_unnamed(&unnamed, source);
+                let parse_fields = parse_fields_unnamed(&unnamed, token);
 
-                quote! {
-                    Ok(Self { #(#fields),* })
-                }
+                let parse = quote! {
+                    Ok(Self(#(#parse_fields),*))
+                };
+
+                let is_next = unnamed
+                    .unnamed
+                    .first()
+                    .map(|field| {
+                        let ty = &field.ty;
+
+                        quote!(<#ty as ::lasagna::Parse>::START)
+                    })
+                    .expect(NO_FIELDS);
+
+                (parse, is_next)
             }
-            Fields::Unit => {
-                quote! {
-                    parser.next::<Self>()
-                }
-            }
+            Fields::Unit => unimplemented!("{}", NO_FIELDS),
         },
         _ => unimplemented!(),
     }
 }
 
-fn try_variant(variant: TokenStream) -> TokenStream {
-    quote! {
-        {
-            let variant = |parser: &mut _| {
-                Result::<_, lasagna::ParseError>::Ok(#variant)
-            };
-
-            let mut fork = parser.fork();
-
-            if let Ok(variant) = variant(&mut fork) {
-                *parser = fork;
-
-                return Ok(variant);
-            }
-        }
-    }
-}
-
-fn fields_named<'a>(
+fn parse_fields_named<'a>(
     fields: &'a FieldsNamed,
-    source: &'a mut Option<Type>,
+    token: &'a mut Option<Type>,
 ) -> impl Iterator<Item = TokenStream> + 'a {
     fields.named.iter().map(move |field| {
         let name = field.ident.as_ref().unwrap();
         let ty = &field.ty;
 
-        if source.is_none() {
-            *source = Some(parse_quote!(<#ty as lasagna::Parse>::Source));
+        if token.is_none() {
+            *token = Some(parse_quote!(<#ty as ::lasagna::Parse>::Token));
         }
 
         quote_spanned! {name.span()=>
-            #name: <#ty as lasagna::Parse>::parse(parser)?
+            #name: <#ty as ::lasagna::Parse>::parse(parser)?
         }
     })
 }
 
-fn fields_unnamed<'a>(
+fn parse_fields_unnamed<'a>(
     fields: &'a FieldsUnnamed,
-    source: &'a mut Option<Type>,
+    token: &'a mut Option<Type>,
 ) -> impl Iterator<Item = TokenStream> + 'a {
     fields.unnamed.iter().map(move |field| {
         let ty = &field.ty;
 
-        if source.is_none() {
-            *source = Some(parse_quote!(<#ty as lasagna::Parse>::Source));
+        if token.is_none() {
+            *token = Some(parse_quote!(<#ty as ::lasagna::Parse>::Token));
         }
 
         quote_spanned! {field.span()=>
-            <#ty as lasagna::Parse>::parse(parser)?
+            <#ty as ::lasagna::Parse>::parse(parser)?
         }
     })
 }

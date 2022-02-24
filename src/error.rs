@@ -1,84 +1,136 @@
+use std::{
+    fmt::{Debug, Display},
+    panic::Location,
+};
+
 use crate::Span;
 
-#[derive(Clone, Debug)]
-pub enum ParseError {
-    ExpectedOne {
-        span: Span,
-        expected: Vec<String>,
-    },
-    Expected {
-        span: Span,
-        found: String,
-        expected: String,
-    },
-    UnexpectedEof {
-        span: Span,
-        expected: String,
-    },
-    Message {
-        span: Span,
-        msg: String,
-    },
+#[derive(Debug)]
+pub struct Error {
+    message: String,
+    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
+    span: Option<Span>,
+    hints: Vec<ErrorHint>,
+    location: &'static Location<'static>,
 }
 
-impl ParseError {
-    #[inline]
-    pub fn eof(span: Span, expected: impl Into<String>) -> Self {
-        Self::UnexpectedEof {
-            span,
-            expected: expected.into(),
+impl Error {
+    #[track_caller]
+    pub fn new(msg: impl Display) -> Self {
+        Self {
+            message: msg.to_string(),
+            source: None,
+            span: None,
+            hints: Vec::new(),
+            location: Location::caller(),
         }
     }
 
-    #[inline]
-    pub fn msg(span: Span, msg: impl Into<String>) -> Self {
-        Self::Message {
-            span,
-            msg: msg.into(),
+    #[track_caller]
+    pub fn spanned(span: Span, msg: impl Display) -> Self {
+        Self {
+            message: msg.to_string(),
+            source: None,
+            span: Some(span),
+            hints: Vec::new(),
+            location: Location::caller(),
         }
+    }
+
+    pub fn msg(&self) -> &str {
+        &self.message
+    }
+
+    pub fn source(&self) -> Option<&Box<dyn std::error::Error + Send + Sync + 'static>> {
+        self.source.as_ref()
+    }
+
+    pub fn span(&self) -> Option<Span> {
+        self.span
+    }
+
+    pub fn hints(&self) -> &[ErrorHint] {
+        &self.hints
+    }
+
+    pub fn location(&self) -> &'static Location<'static> {
+        self.location
+    }
+
+    #[track_caller]
+    pub fn expected(span: Span, expected: impl Display, found: impl Display) -> Self {
+        Self::new(format!("expected '{}'", expected))
+            .with_hint(ErrorHint::spanned(span, format!("found '{}'", found)))
+    }
+
+    #[track_caller]
+    pub fn expected_one(span: Span, expected: &[impl Debug], found: impl Display) -> Self {
+        Self::new(format!("expected '{:?}'", expected))
+            .with_hint(ErrorHint::spanned(span, format!("found '{}'", found)))
+    }
+
+    pub fn with_hint(mut self, hint: ErrorHint) -> Self {
+        self.add_hint(hint);
+        self
+    }
+
+    pub fn add_hint(&mut self, hint: ErrorHint) {
+        self.hints.push(hint);
     }
 }
 
-impl std::fmt::Display for ParseError {
+#[derive(Debug)]
+pub struct ErrorHint {
+    msg: String,
+    source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
+    spans: Vec<Span>,
+}
+
+impl ErrorHint {
+    pub fn new(msg: impl Display) -> Self {
+        Self {
+            msg: msg.to_string(),
+            source: None,
+            spans: Vec::new(),
+        }
+    }
+
+    pub fn spanned(span: Span, msg: impl Display) -> Self {
+        Self {
+            msg: msg.to_string(),
+            source: None,
+            spans: vec![span],
+        }
+    }
+
+    pub fn msg(&self) -> &str {
+        &self.msg
+    }
+
+    pub fn source(&self) -> Option<&Box<dyn std::error::Error + Send + Sync + 'static>> {
+        self.source.as_ref()
+    }
+
+    pub fn span(&self) -> Option<Span> {
+        self.spans.first().cloned()
+    }
+
+    pub fn spans(&self) -> &[Span] {
+        &self.spans
+    }
+}
+
+impl std::fmt::Display for Error {
     #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ExpectedOne { span, expected } => {
-                write!(f, "expected one of the following '")?;
+        writeln!(f, "{}", self.msg())?;
 
-                for (i, e) in expected.iter().enumerate() {
-                    if i < expected.len() - 1 {
-                        write!(f, "{}, ", e)?;
-                    } else {
-                        write!(f, "{}", e)?;
-                    }
-                }
-
-                write!(f, "' at line: {} column: {}", span.line, span.column)
-            }
-            Self::Expected {
-                span,
-                found,
-                expected,
-            } => {
-                write!(
-                    f,
-                    "found {} as line: {} column: {}, expected '{}'",
-                    found, span.line, span.column, expected
-                )
-            }
-            Self::UnexpectedEof { span, expected } => {
-                write!(
-                    f,
-                    "found <eof> at line: {} column: {}, expected '{}'",
-                    span.line, span.column, expected
-                )
-            }
-            Self::Message { span, msg } => {
-                write!(f, "{} at line: {} column {}", msg, span.line, span.column)
-            }
+        for hint in self.hints() {
+            writeln!(f, "{}", hint.msg())?;
         }
+
+        Ok(())
     }
 }
 
-impl std::error::Error for ParseError {}
+impl std::error::Error for Error {}

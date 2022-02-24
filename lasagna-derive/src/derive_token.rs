@@ -1,6 +1,11 @@
-use proc_macro2::TokenStream;
+use proc_macro2::{Ident, TokenStream};
 use quote::{quote, quote_spanned};
-use syn::{Attribute, Data, DataStruct, DeriveInput, Fields, LitStr, Token, parse::{Parse, ParseStream}, parse_macro_input, spanned::Spanned};
+use syn::{
+    parse::{Parse, ParseStream},
+    parse_macro_input,
+    spanned::Spanned,
+    Attribute, Data, DataStruct, DeriveInput, Fields, LitStr, Token,
+};
 
 struct MatchString(LitStr);
 
@@ -10,7 +15,7 @@ impl Parse for MatchString {
 
         Ok(Self(<LitStr as Parse>::parse(input)?))
     }
-} 
+}
 
 #[derive(Default)]
 struct Attributes {
@@ -66,7 +71,7 @@ fn match_string_token(input: DeriveInput, attrs: Attributes) -> TokenStream {
         quote! {
             impl lasagna::Token<char> for #name {
                 #[inline]
-                fn lex(lexer: &mut impl lasagna::Lexer<Output = char>) -> Result<Self, lasagna::ParseError> {
+                fn lex(lexer: &mut impl lasagna::Lexer<Output = char>) -> Result<Self, lasagna::Error> {
                     #match_string
 
                     Ok(Self)
@@ -79,7 +84,7 @@ fn match_string_token(input: DeriveInput, attrs: Attributes) -> TokenStream {
                 #[inline]
                 fn parse(
                     parser: &mut impl lasagna::Parser<Source = Self::Source>
-                ) -> Result<Self, lasagna::ParseError> {
+                ) -> Result<Self, lasagna::Error> {
                     parser.next::<Self>()
                 }
             }
@@ -96,18 +101,18 @@ fn match_string(match_string: &LitStr) -> TokenStream {
 
             if let Some(next_char) = next {
                 if next_char != c {
-                    return Err(lasagna::ParseError::Expected {
-                        span: lasagna::Lexer::span(lexer, 0),
-                        found: String::from(next_char),
-                        expected: String::from(c),
-                    });
+                    return Err(lasagna::Error::expected(
+                        lasagna::Lexer::span(lexer, 0),
+                        next_char,
+                        c,
+                    ));
                 }
             } else {
-                return Err(lasagna::ParseError::Expected {
-                    span: lasagna::Lexer::span(lexer, 0),
-                    found: String::from("<eof>"),
-                    expected: String::from(c),
-                });
+                return Err(lasagna::Error::expected(
+                    lasagna::Lexer::span(lexer, 0),
+                    "<eof>",
+                    c,
+                ));
             }
         }
     }
@@ -115,92 +120,87 @@ fn match_string(match_string: &LitStr) -> TokenStream {
 
 fn source_token(input: DeriveInput) -> TokenStream {
     let name = input.ident;
+    let kind_name = Ident::new(&format!("{}Kind", name), name.span());
 
     match input.data {
         Data::Enum(data) => {
+            let mut variant_matches = Vec::new();
             let mut lex_variant = Vec::new();
             let mut token_variants = Vec::new();
             let mut display_variants = Vec::new();
+            let mut variant_names = Vec::new();
+            let mut kind_names = Vec::new();
 
             for variant in data.variants {
                 let mut attrs = Attributes::default();
                 attrs.from_attrs(&variant.attrs);
 
-                let variant_name = variant.ident;
+                let variant_ident = variant.ident;
+                let variant_name = variant_ident.to_string();
+                variant_names.push(variant_name.clone());
+
+                kind_names.push(variant_ident.clone());
 
                 if let Some(string) = attrs.match_string {
-                    display_variants.push(quote_spanned! {variant_name.span()=> 
-                        Self::#variant_name => write!(f, "{}", #string)
+                    variant_matches.push(quote!(Self::#variant_ident));
+
+                    display_variants.push(quote_spanned! {variant_ident.span()=>
+                        Self::#variant_ident => write!(f, "{}", #string)
                     });
 
                     let match_string = match_string(&string);
 
-                    lex_variant.push(quote_spanned! {variant_name.span()=>
+                    lex_variant.push(quote_spanned! {variant_ident.span()=>
                         let mut fork = lexer.fork();
 
                         {
                             fn variant(
                                 lexer: &mut impl lasagna::Lexer<Output = char>
-                            ) -> Result<(), lasagna::ParseError> {
+                            ) -> Result<(), lasagna::Error> {
                                 #match_string
 
                                 Ok(())
-                            } 
+                            }
 
                             if variant(&mut fork).is_ok() {
                                 *lexer = fork;
 
-                                return Ok(Self::#variant_name);
+                                return Ok(Self::#variant_ident);
                             }
                         }
                     });
 
-                    token_variants.push(quote_spanned! {variant_name.span()=>
-                        #[derive(Clone, Copy, Default, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-                        pub struct #variant_name(lasagna::Span);
+                    token_variants.push(quote_spanned! {variant_ident.span()=>
+                        #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+                        pub struct #variant_ident(lasagna::Span);
 
-                        impl lasagna::Spanned for #variant_name {
+                        impl lasagna::Spanned for #variant_ident {
                             #[inline]
                             fn span(&self) -> lasagna::Span {
                                 self.0
                             }
                         }
 
-                        impl lasagna::Named for #variant_name {
-                            const NAME: &'static str = #string;
-                        }
+                        impl lasagna::Parse for #variant_ident {
+                            type Token = #name;
 
-                        impl lasagna::Token<#name> for #variant_name {
-                            #[inline]
-                            fn lex(
-                                lexer: &mut impl lasagna::Lexer<Output = #name>
-                            ) -> Result<Self, lasagna::ParseError> {
-                                let span = lexer.span(0);
-                                let next = lexer.next();
-
-                                if let Some(next_source) = next {
-                                    if let #name::#variant_name = next_source {
-                                        Ok(Self(span | lexer.span(0)))
-                                    } else {
-                                        Err(lasagna::ParseError::msg(
-                                            span | lexer.span(0), 
-                                            format!("expected '{}'", <#variant_name as lasagna::Named>::NAME)
-                                        ))
-                                    }
-                                } else {
-                                    Err(lasagna::ParseError::eof(span, stringify!(#variant_name)))
-                                }
-                            }
-                        }
-
-                        impl lasagna::Parse for #variant_name {
-                            type Source = #name;
+                            const START: ::lasagna::ParseStart<Self::Token> =
+                                &::lasagna::StartTokens::Token(&#kind_name::#variant_ident);
 
                             #[inline]
                             fn parse(
-                                parser: &mut impl lasagna::Parser<Source = Self::Source>
-                            ) -> Result<Self, lasagna::ParseError> {
-                                parser.next()
+                                parser: &mut impl Parser<Self::Token>,
+                            ) -> Result<Self, lasagna::Error> {
+                                let span = parser.span(0);
+                                let token = parser.next()?;
+                                let span = span | parser.span(0);
+
+                                match token {
+                                    #name::#variant_ident => Ok(Self(span)),
+                                    _ => ::std::result::Result::Err(
+                                        ::lasagna::Error::expected(span, #variant_name, token),
+                                    ),
+                                }
                             }
                         }
                     });
@@ -208,62 +208,52 @@ fn source_token(input: DeriveInput) -> TokenStream {
                     let field = if let Fields::Unnamed(unnamed) = &variant.fields {
                         if unnamed.unnamed.len() == 1 {
                             &unnamed.unnamed[0]
-                        } else { 
+                        } else {
                             unimplemented!("extern tokens must have one field")
                         }
                     } else {
-                        unimplemented!("extern tokens must be unnamed variant")  
+                        unimplemented!("extern tokens must be unnamed variant")
                     };
+
+                    variant_matches.push(quote!(Self::#variant_ident(_)));
 
                     let field_ty = &field.ty;
 
                     display_variants.push(quote_spanned! {field_ty.span()=>
-                        Self::#variant_name(_) => write!(f, "{}", <#field_ty as lasagna::Named>::NAME)
+                        Self::#variant_ident(_) => write!(f, "{}", #variant_name)
                     });
 
-                    lex_variant.push(quote_spanned! {variant_name.span()=>
+                    lex_variant.push(quote_spanned! {variant_ident.span()=>
                         let mut fork = lexer.fork();
 
-                        if let Ok(tok) = <#field_ty as lasagna::Token<char>>::lex(&mut fork) {
+                        if let Ok(tok) = <#field_ty as lasagna::Lex<char>>::lex(&mut fork) {
                             *lexer = fork;
 
-                            return Ok(Self::#variant_name(tok));
+                            return Ok(Self::#variant_ident(tok));
                         }
                     });
 
-                    token_variants.push(quote_spanned! {variant_name.span()=>
-                        impl lasagna::Token<#name> for #field_ty {
-                            #[inline]
-                            fn lex(
-                                lexer: &mut impl Lexer<Output = #name>
-                            ) -> Result<Self, lasagna::ParseError> {
-                                let span = lexer.span(0);
-                                let next = lexer.next();
-
-                                if let Some(tok) = next {
-                                    #[allow(irrefutable_let_patterns)]
-                                    if let #name::#variant_name(var) = tok {
-                                        Ok(var)
-                                    } else {
-                                        Err(lasagna::ParseError::msg(
-                                            span | lexer.span(0),
-                                            format!("expected '{}'", <#field_ty as lasagna::Named>::NAME),
-                                        ))
-                                    }
-                                } else {
-                                    Err(lasagna::ParseError::eof(span, <#field_ty as lasagna::Named>::NAME))
-                                }
-                            }
-                        }
-
+                    token_variants.push(quote_spanned! {variant_ident.span()=>
                         impl lasagna::Parse for #field_ty {
-                            type Source = #name;
+                            type Token = #name;
+
+                            const START: ::lasagna::ParseStart<Self::Token> =
+                                &::lasagna::StartTokens::Token(&#kind_name::#variant_ident);
 
                             #[inline]
                             fn parse(
-                                parser: &mut impl Parser<Source = Self::Source>,
-                            ) -> Result<Self, lasagna::ParseError> {
-                                parser.next()
+                                parser: &mut impl Parser<Self::Token>,
+                            ) -> Result<Self, lasagna::Error> {
+                                let span = parser.span(0);
+                                let token = parser.next()?;
+                                let span = span | parser.span(0);
+
+                                match token {
+                                    #name::#field_ty(var) => Ok(var),
+                                    _ => ::std::result::Result::Err(
+                                        ::lasagna::Error::expected(span, #variant_name, token)
+                                    ),
+                                }
                             }
                         }
                     });
@@ -271,7 +261,21 @@ fn source_token(input: DeriveInput) -> TokenStream {
             }
 
             quote! {
+                #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+                pub enum #kind_name {
+                    #(#kind_names,)*
+                }
+
+                impl ::lasagna::TokenKind for #kind_name {
+                    fn name(&self) -> &str {
+                        match self {
+                            #(Self::#kind_names => #variant_names,)*
+                        }
+                    }
+                }
+
                 impl std::fmt::Display for #name {
+                    #[inline]
                     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                         match self {
                             #(#display_variants),*
@@ -280,21 +284,34 @@ fn source_token(input: DeriveInput) -> TokenStream {
                 }
 
                 impl lasagna::Token<char> for #name {
+                    type Kind = #kind_name;
+
                     #[inline]
-                    fn lex(lexer: &mut impl Lexer<Output = char>) -> Result<Self, lasagna::ParseError> {
+                    fn kind(&self) -> Self::Kind {
+                        match self {
+                            #(#variant_matches => #kind_name::#kind_names,)*
+                        }
+                    }
+                }
+
+                impl ::lasagna::Lex<char> for #name {
+                    #[inline]
+                    fn lex(lexer: &mut impl Lexer<Output = char>) -> Result<Self, lasagna::Error> {
                         #(#lex_variant)*
 
-                        Err(lasagna::ParseError::eof(lexer.span(0), <#name as lasagna::Named>::NAME))
+                        Err(lasagna::Error::expected(lexer.span(0), "token", "eof"))
                     }
                 }
 
                 impl lasagna::Parse for #name {
-                    type Source = char;
+                    type Token = Self;
+
+                    const START: ::lasagna::ParseStart<Self::Token> = &::lasagna::StartTokens::All;
 
                     #[inline]
                     fn parse(
-                        parser: &mut impl Parser<Source = Self::Source>
-                    ) -> Result<Self, lasagna::ParseError> {
+                        parser: &mut impl Parser<Self::Token>
+                    ) -> Result<Self, lasagna::Error> {
                         parser.next()
                     }
                 }

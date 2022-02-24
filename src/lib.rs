@@ -1,15 +1,12 @@
 mod error;
 mod parser;
-mod parser_ext;
-mod parser_lexer;
 mod span;
+mod string_allocator;
 mod token;
 mod vec;
 
 pub use error::*;
 pub use parser::*;
-pub use parser_ext::*;
-pub use parser_lexer::*;
 pub use span::*;
 pub use token::*;
 pub use vec::*;

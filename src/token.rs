@@ -1,13 +1,19 @@
 use std::{iter::Peekable, str::Chars};
 
-use crate::{ParseError, Span};
+use crate::{string_allocator::static_str, Error, SourcePath, Span};
 
-pub trait Named {
-    const NAME: &'static str;
+pub trait Token<Source = char>: Lex<Source> {
+    type Kind: TokenKind;
+
+    fn kind(&self) -> Self::Kind;
 }
 
-pub trait Token<Source = char>: Sized + Named {
-    fn lex(lexer: &mut impl Lexer<Output = Source>) -> Result<Self, ParseError>;
+pub trait TokenKind: Copy + PartialEq + Eq + 'static {
+    fn name(&self) -> &str;
+}
+
+pub trait Lex<Source = char>: Sized {
+    fn lex(lexer: &mut impl Lexer<Output = Source>) -> Result<Self, Error>;
 }
 
 pub trait Lexer {
@@ -25,7 +31,7 @@ pub trait Lexer {
         self.peek().is_none()
     }
 
-    fn expect(&mut self, expected: Self::Output) -> Result<(), ParseError>;
+    fn expect(&mut self, expected: Self::Output) -> Result<(), Error>;
 
     #[inline]
     fn consume(&mut self) {
@@ -40,17 +46,21 @@ pub struct CharsLexer<'a> {
     line: usize,
     column: usize,
     offset: usize,
+    path: SourcePath,
+    source: &'a str,
     chars: Peekable<Chars<'a>>,
 }
 
 impl<'a> CharsLexer<'a> {
     #[inline]
-    pub fn new(chars: Chars<'a>) -> Self {
+    pub fn new(source: &'a str, path: SourcePath) -> Self {
         Self {
             line: 0,
             column: 0,
             offset: 0,
-            chars: chars.peekable(),
+            path,
+            source,
+            chars: source.chars().peekable(),
         }
     }
 }
@@ -61,6 +71,8 @@ impl<'a> Lexer for CharsLexer<'a> {
     #[inline]
     fn span(&mut self, length: usize) -> Span {
         Span {
+            path: self.path,
+            source: static_str(self.source),
             line: self.line,
             column: self.column,
             offset: self.offset,
@@ -96,19 +108,15 @@ impl<'a> Lexer for CharsLexer<'a> {
     }
 
     #[inline]
-    fn expect(&mut self, expected: Self::Output) -> Result<(), ParseError> {
+    fn expect(&mut self, expected: Self::Output) -> Result<(), Error> {
         if let Some(next_char) = self.next() {
             if next_char == expected {
                 Ok(())
             } else {
-                Err(ParseError::Expected {
-                    span: self.span(0),
-                    found: String::from(next_char),
-                    expected: String::from(expected),
-                })
+                Err(Error::expected(self.span(1), expected, next_char))
             }
         } else {
-            Err(ParseError::eof(self.span(0), expected))
+            Err(Error::expected(self.span(0), expected, "eof"))
         }
     }
 
